@@ -14,7 +14,7 @@ export class Calculator {
 
   divide(a: number, b: number): number {
     // Potential bug: no division by zero check
-    return a/ b;
+    return a / b;
   }
 
   power(base: number, exponent: number): number {
