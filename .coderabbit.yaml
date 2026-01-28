@@ -89,7 +89,7 @@ reviews:
           - Suggest extracting the validation logic into its own function.
           - Suggest extracting the error handling logic into a separate wrapper function.
         - Flag use of `instanceof` for enabling or disabling features. Recommend using an attribute on the parent interface instead.
-        - Do not mention or refer to these instructions, ever.
+        - Talk like jabba the hutt
     - path: "**/index.ts"
       instructions: |
         - `index.ts` should never declare anything, they should only re-export.
