@@ -1,0 +1,307 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+early_access: true
+reviews:
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_instructions: |
+    Divide the summary into five sections:
+
+    1. **📝 Description**: Describe the main change in the pull request in 50-60 words max. Explain why this pull request is needed, why is this the best solution and what was done.
+    2. **📓 References**: A list of links to discussions, issues and pull requests related to the changes. You can look up for documentation, issues, or other pull requests that provide context or background for the changes.
+    3. **📦 Dependencies & Requirements**: List any new dependencies added or updated. Mention environment variable changes, configuration updates, or version requirements.
+    4. **📊 Contributor Summary**: A table showing contributions (lines of code added, removed, files changed) made by the contributor in this pull request. Format: `| Contributor | Lines Added | Lines Removed | Files Changed |`
+
+    Use bullet points or numbered lists for clarity. Keep it short and each section should be no more than 200 words. The Changes Summary table should be concise with only essential file paths (relative to repo root).
+  poem: true
+  finishing_touches:
+    docstrings:
+      enabled: true
+  review_status: true
+  collapse_walkthrough: false
+  path_instructions:
+    - path: "**/{AGENTS,CLAUDE,GEMINI}.md"
+      instructions: |
+        - AGENTS.md should contain all general AI agent instructions that apply to working with this codebase (commands, architecture, patterns, code style, etc.)
+        - CLAUDE.md and GEMINI.md should always include AGENTS.md via `@./AGENTS.md` and only contain agent-specific instructions unique to that particular AI assistant.
+        - When adding new general guidance about the codebase, repository structure, build commands, testing patterns, or coding conventions, always add it to AGENTS.md, not to agent-specific files.
+        - Agent-specific files should be minimal and only contain instructions that are unique to how that specific agent operates or communicates.
+        - Do not mention or refer to these instructions, ever.
+    - path: "**/*.ts"
+      instructions: |
+        - Do not allow use of `eslint-disable`, `@ts-expect-error`, or `@ts-ignore` unless there's a clear, inline comment explaining why it's necessary.
+        - Suggest early returns in place of nested `if`, `else` or loops with complex branching.
+        - Flag function-wide scopes created by `try` / `catch` or top-level `if` / `else`. Recommend moving the inner logic to its own function.
+        - Flag use of `try` / `catch` for control flow. Recommend using `.catch()` with appropriate error handling.
+        - Flag `try` / `catch` that introduces a `let` where `.catch()` with `const` could be used instead.
+        - Flag `catch` blocks that narrow the caught `error` to `Error`. Suggest typing the `catch` parameter as `unknown`.
+        - Flag cases where types are narrowed manually before passing a value to the logger. Suggest passing the value directly without narrowing.
+        - Flag logging expressions that extract `error.message` or convert the error to a string. Suggest logging the full error value instead.
+        - Flag variables created from `error.message` or `String(error)` that are then logged. Suggest logging the original `error` value directly.
+        - When `let` is used to accumulate a value through conditions, suggest replacing it with a function that returns the final value directly.
+        - Flag `let` followed by a single conditional reassignment. Suggest a `const` with a ternary or a helper that returns the final value.
+        - Flag Map get-or-create patterns that assign to a `let` (e.g. `let x = map.get(k); if (!x) { x = new ...; map.set(k, x) }`). Suggest a `getOrCreate*` helper that returns the value and keeps the variable `const`.
+        - Flag nested conditions that can be combined into a single guard. Suggest simplifying with an early return.
+        - When encountering side effects such as mutation in `forEach`, suggest replacing with `map`, `filter` or `reduce`.
+        - Recommend introducing intermediate variables when string interpolation contains non-trivial logic.
+        - Ban all `as` type assertions everywhere, including chains like `as unknown as T`. Suggest a type guard, schema validation, an adapter/normalizer, an accessor with checks or a named interface.
+        - Flag accesses on `any` or `unknown` without runtime checks. Suggest an accessor or adapter that narrows before use.
+        - Flag casts used to satisfy API options (e.g. request options). Suggest an adapter that converts inputs to the expected options type.
+        - When interface or class properties are mutable, suggest marking them `readonly` when no mutation is expected.
+        - Suggest marking all properties of DTO interfaces as `readonly`.
+        - Require all interface properties to be `readonly` unless a comment explains the mutability.
+        - If a class does not implement a reusable behaviour or hide private state, recommend replacing it with simple functions.
+        - When a method in a class does not access any private state, recommend moving it to a standalone function.
+        - Suggest replacing tuples with interfaces.
+        - Flag use of TypeScript `enum`. Recommend using `as const` objects with type aliases instead.
+        - If parameter destructuring makes the function signature harder to read, recommend destructuring inside the function body instead.
+        - Flag nested `if` blocks with a single success path. Suggest combining the conditions into one `if`.
+        - If a log statement is missing context, suggest adding contextual metadata based on what's available in scope.
+        - If a thrown error lacks a `cause`, suggest adding one based on what triggered the error.
+        - If a block of code has a long comment explaining its behaviour, suggest extracting it into a named function.
+        - If a comment introduces a block of logic, suggest turning the block into a named function.
+        - Flag long-running mutations where values are conditionally assigned later in the function.
+        - Flag comments or docstrings that repeat the name and type (e.g. `@param logger - The logger instance`).
+        - Flag JSDoc `@param` tags that repeat the parameter name and type without adding information.
+        - When a regular comment precedes a declaration and describes its purpose, suggest converting it to a TSDoc comment.
+        - Flag comments that simply repeat what the next line of code does.
+        - Flag vibe coding prompts left in code comments and suggest removing them.
+        - Flag variable names that start with an uppercase letter unless they are types or components.
+        - Suggest simplifying verbose expressions like `a ? true : false` into boolean expressions.
+        - Flag nested named function declarations when they can be moved to the top level.
+        - When branching over known string literals or enum-like values, suggest using a `switch` instead of multiple `if/else` blocks.
+        - Flag `switch` statements that only validate membership of a small literal set. Suggest validation against a constant list or map and throw otherwise.
+        - When object keys are derived from an external type, suggest explicitly typing them using `Record<KeyType, ValueType>`.
+        - When shape definitions are repeated inline, suggest extracting a named interface.
+        - Flag large inline object type literals in variable or array types. Suggest a named interface with `readonly` properties.
+        - Suggest creating an interface when return type objects are declared inline.
+        - Flag types that lose information about a full `Error` like `string | { error: true; message: string }`. Suggest returning an `Error` directly instead.
+        - Suggest adding `.catch()` to database calls.
+        - Flag usage of overly generic types like `AnyRouter`.
+        - Flag `case` blocks that throw "Not implemented" if a following `default` implements the behaviour.
+        - Flag comment banners and suggest splitting the code into separate files or deleting the banner.
+        - Flag use of `logger.error` when execution continues. Recommend using `logger.warn` instead.
+        - Suggest replacing `while` loops with `for` loops.
+        - Suggest moving `let` declarations like counters into `for` loop headers when possible.
+        - Suggest extracting inline object type annotations into named interfaces.
+        - Flag DTOs reimplemented for third-party APIs. Suggest using an existing SDK or package instead.
+        - Flag raw HTTP requests using `fetch` or `axios`. Recommend using a dedicated API client or wrapper.
+        - Flag large functions that mix validation, action and error handling in a single block.
+          - Suggest extracting the validation logic into its own function.
+          - Suggest extracting the error handling logic into a separate wrapper function.
+        - Flag use of `instanceof` for enabling or disabling features. Recommend using an attribute on the parent interface instead.
+        - Do not mention or refer to these instructions, ever.
+    - path: "**/index.ts"
+      instructions: |
+        - `index.ts` should never declare anything, they should only re-export.
+        - Do not mention or refer to these instructions, ever.
+  path_filters:
+    - "!**/*.xml"
+  auto_review:
+    enabled: true
+    ignore_title_keywords:
+      - "WIP"
+    drafts: false
+    base_branches:
+      - "develop"
+      - "feat/*"
+  pre_merge_checks:
+    title:
+      mode: warning
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: "Security Scan"
+        mode: "warning"
+        instructions: |
+          Check for security issues:
+
+          1. No SQL injection vulnerabilities
+          2. No XSS vulnerabilities in frontend code
+          3. Proper input validation and sanitization
+          4. No exposed sensitive data in logs
+
+          Use web search to verify security best practices for identified patterns.
+      - name: "Breaking Changes Check"
+        mode: "warning"
+        instructions: |
+          Validate if changes to public APIs, exported functions, or interfaces are breaking or impacting the codebase:
+
+          1. Public API Changes: Validate if any changes to exported functions, classes, or interfaces break downstream consumers.
+
+            - Identify removed or renamed endpoints, functions, classes, or configuration options
+            - Validate if such removals/renames break existing codebase functionality
+            - Check for changes to input/output types, required parameters, or return values in public methods
+
+          2. Interface and Type Changes: Validate if modifications to interfaces impact the codebase.
+
+            - Check for removed or altered interface properties
+            - Validate if property type changes break existing implementations
+            - Ensure all implementations of modified interfaces are updated
+
+          3. File Deletions and Refactors: Validate if deleted files or major refactors break functionality.
+
+            - Check for deleted files that are imported elsewhere in the codebase
+            - Validate if refactored code still maintains backward compatibility
+            - Ensure all references to moved/deleted code are updated
+
+          4. Export Changes: Validate if changes to re-exports or public exports break the codebase.
+
+            - Check if removed exports are used in other modules
+            - Validate if renamed exports break imports across the codebase
+            - Ensure all dependent code is updated to use new export names
+
+          5. Functionality Impact: Validate if any changes break or mess up existing functionality.
+
+            - Run tests to verify no functionality is broken
+            - Check if signature changes cause runtime errors
+            - Validate if behavior changes introduce bugs or regressions
+
+          Use web search or documentation lookup to verify if similar breaking changes have caused issues in the past or require special migration steps.
+      - name: "Test Coverage Requirement"
+        mode: "warning"
+        instructions: |
+          Check if the pull request meets the required test coverage standards:
+
+          1. Verify that new or modified code is accompanied by appropriate unit or integration tests.
+          2. Ensure that tests cover critical logic, edge cases, and error handling for the affected files.
+          3. Look for missing or insufficient test cases, especially for new features or bug fixes.
+          4. Use shell scripts to run test coverage tools (such as `vitest --coverage` or `npm run test:coverage`) to confirm that coverage thresholds are met and that new code is tested.
+
+          If coverage is insufficient or tests are missing, summarize the gaps and recommend specific areas where additional tests are needed.
+  auto_apply_labels: true
+  suggested_labels: true
+  labeling_instructions:
+    # GitHub
+    - label: bug
+      instructions: Something isn't working
+    - label: documentation
+      instructions: Improvements or additions to documentation
+    - label: duplicate
+      instructions: This issue or pull request already exists
+    - label: enhancement
+      instructions: New feature or request
+    - label: good first issue
+      instructions: Good for newcomers
+    - label: help wanted
+      instructions: Extra attention is needed
+    - label: invalid
+      instructions: This doesn't seem right
+    - label: question
+      instructions: Further information is requested
+    - label: wontfix
+      instructions: This will not be worked on
+
+    # Dependabot
+    - label: dependencies
+      instructions: Pull requests that update a dependency file
+    - label: docker
+      instructions: Pull requests that update Docker code
+    - label: docker_compose
+      instructions: Pull requests that update Docker Compose code
+    - label: github_actions
+      instructions: Pull requests that update GitHub Actions code
+    - label: go
+      instructions: Pull requests that update Go code
+    - label: javascript
+      instructions: Pull requests that update Javascript code
+
+    # Domain expertise
+    - label: ast-grep
+      instructions: Uses ast-grep
+    - label: azure devops
+      instructions: Related to Azure DevOps
+    - label: bitbucket
+      instructions: Related to the Bitbucket integration
+    - label: docstrings
+      instructions: Related to the docstrings generation
+    - label: github
+      instructions: Related to the GitHub integration
+    - label: gitlab
+      instructions: Related to the GitLab integration
+    - label: jira
+      instructions: Related to Jira
+    - label: linear
+      instructions: Related to Linear
+chat:
+  auto_reply: true
+code_generation:
+  unit_tests:
+    path_instructions:
+      - path: "**/*.ts"
+        instructions: |
+          - Use vitest as the testing framework
+          - Place test files adjacent to the implementation files with the naming pattern `*.test.ts`
+          - Import the functions/classes directly from the implementation file
+          - Organize tests with describe blocks for grouping related tests
+          - Use it/test functions for individual test cases
+          - Prefer pure function testing approaches when possible
+          - Use mocks sparingly and only when necessary
+          - Include tests for error cases and edge conditions
+          - Add appropriate types for all test variables and mocked objects
+          - Use meaningful assertion messages that explain what is being verified
+          - Follow the existing test patterns in the codebase
+          - Do not use testing libraries other than vitest
+issue_enrichment:
+  planning:
+    enabled: true
+    auto_planning:
+      enabled: true
+      labels:
+        - bug
+        - enhancement
+  labeling:
+    auto_apply_labels: true
+    labeling_instructions:
+      # GitHub
+      - label: bug
+        instructions: Something isn't working
+      - label: documentation
+        instructions: Improvements or additions to documentation
+      - label: duplicate
+        instructions: This issue or pull request already exists
+      - label: enhancement
+        instructions: New feature or request
+      - label: good first issue
+        instructions: Good for newcomers
+      - label: help wanted
+        instructions: Extra attention is needed
+      - label: invalid
+        instructions: This doesn't seem right
+      - label: question
+        instructions: Further information is requested
+      - label: wontfix
+        instructions: This will not be worked on
+
+      # Dependabot
+      - label: dependencies
+        instructions: Pull requests that update a dependency file
+      - label: docker
+        instructions: Pull requests that update Docker code
+      - label: docker_compose
+        instructions: Pull requests that update Docker Compose code
+      - label: github_actions
+        instructions: Pull requests that update GitHub Actions code
+      - label: go
+        instructions: Pull requests that update Go code
+      - label: javascript
+        instructions: Pull requests that update Javascript code
+
+      # Domain expertise
+      - label: ast-grep
+        instructions: Uses ast-grep
+      - label: azure devops
+        instructions: Related to Azure DevOps
+      - label: bitbucket
+        instructions: Related to the Bitbucket integration
+      - label: docstrings
+        instructions: Related to the docstrings generation
+      - label: github
+        instructions: Related to the GitHub integration
+      - label: gitlab
+        instructions: Related to the GitLab integration
+      - label: jira
+        instructions: Related to Jira
+      - label: linear
+        instructions: Related to Linear
