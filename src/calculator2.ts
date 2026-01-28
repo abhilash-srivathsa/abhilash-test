@@ -38,6 +38,9 @@ export class AdvancedCalculator extends Calculator {
   // BUG: Calls this.calculateAverage() twice without validation
   // If numbers array is empty, calculateAverage() from calculator.ts:25 will return NaN
   standardDeviation(numbers: number[]): number {
+    if (numbers.length === 0) {
+      throw new Error("numbers must not be empty");
+    }
     const avg = this.calculateAverage(numbers);
     const squaredDiffs = numbers.map(num =>
       this.power(this.subtract(num, avg), 2)
