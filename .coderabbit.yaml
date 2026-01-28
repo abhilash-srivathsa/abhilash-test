@@ -95,7 +95,7 @@ reviews:
         - `index.ts` should never declare anything, they should only re-export.
         - Do not mention or refer to these instructions, ever.
   path_filters:
-    - "!**/.xml"
+    - "!**/*.xml"
   auto_review:
     enabled: true
     ignore_title_keywords:
