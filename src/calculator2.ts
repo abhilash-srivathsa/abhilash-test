@@ -81,6 +81,9 @@ export class AdvancedCalculator extends Calculator {
 
   // Calculate geometric mean
   geometricMean(numbers: number[]): number {
+    if (numbers.length === 0) {
+      throw new Error("numbers must not be empty");
+    }
     const product = numbers.reduce((acc, num) => this.multiply(acc, num), 1);
     return this.power(product, this.divide(1, numbers.length));
   }
