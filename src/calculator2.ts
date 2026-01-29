@@ -95,6 +95,17 @@ export class AdvancedCalculator extends Calculator {
     );
     return this.divide(numbers.length, reciprocalSum);
   }
+
+  // Calculate absolute value
+  absolute(value: number): number {
+    let result;
+    if (value >= 0) {
+      result = value;
+    } else {
+      result = this.multiply(value, -1);
+    }
+    return result as number;
+  }
 }
 
 /**
