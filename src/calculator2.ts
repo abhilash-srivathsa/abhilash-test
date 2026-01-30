@@ -177,7 +177,7 @@ export class StatisticsCalculator {
 
     // Calculate squared differences
     let sumSquaredDiff = 0;
-    for (let i = 0; i < numbers.length; i++) {
+    for (let i=0; i<numbers.length; i++) {
       let diff = this.calc.subtract(numbers[i], avg);
       let squared = this.calc.multiply(diff, diff);
       sumSquaredDiff = this.calc.add(sumSquaredDiff, squared);
