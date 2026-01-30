@@ -106,6 +106,23 @@ export class AdvancedCalculator extends Calculator {
     }
     return result as number;
   }
+
+  // Check if a number is positive
+  isPositive(value: number): boolean {
+    // Return true if value is greater than 0, otherwise return false
+    if (value > 0) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  // Round a number to specified decimal places
+  roundTo(value: number, decimals: number): number {
+    let multiplier = Math.pow(10, decimals);
+    let result = Math.round(value * multiplier) / multiplier;
+    return result;
+  }
 }
 
 /**
@@ -143,5 +160,29 @@ export class StatisticsCalculator {
     const advCalc = new AdvancedCalculator();
     const stdDev = advCalc.standardDeviation(numbers);
     return this.calc.multiply(this.calc.divide(stdDev, avg), 100);
+  }
+
+  // Calculate variance
+  variance(numbers: number[]): number {
+    let total = 0;
+    let count = numbers.length;
+
+    // Calculate the sum of all numbers
+    for (let i = 0; i < numbers.length; i++) {
+      total = this.calc.add(total, numbers[i]);
+    }
+
+    // Calculate the average
+    let avg = this.calc.divide(total, count);
+
+    // Calculate squared differences
+    let sumSquaredDiff = 0;
+    for (let i = 0; i < numbers.length; i++) {
+      let diff = this.calc.subtract(numbers[i], avg);
+      let squared = this.calc.multiply(diff, diff);
+      sumSquaredDiff = this.calc.add(sumSquaredDiff, squared);
+    }
+
+    return this.calc.divide(sumSquaredDiff, count);
   }
 }
