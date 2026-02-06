@@ -186,3 +186,100 @@ export class StatisticsCalculator {
     return this.calc.divide(sumSquaredDiff, count);
   }
 }
+
+/**
+ * Comment interface for type safety
+ */
+interface Comment {
+  id: number;
+  organizationName: string;
+  content: string;
+  author: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/**
+ * CommentManager class handles creating and managing comments for organizations
+ * Demonstrates basic CRUD operations for a comment system
+ */
+export class CommentManager {
+  private comments: Comment[] = [];
+  private nextId: number = 1;
+
+  /**
+   * Create a new comment for an organization
+   * @param organizationName - The name of the organization
+   * @param content - The comment content
+   * @param author - The author of the comment
+   * @returns The newly created comment
+   */
+  createComment(organizationName: string, content: string, author: string): Comment {
+    const newComment: Comment = {
+      id: this.nextId++,
+      organizationName,
+      content,
+      author,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    this.comments.push(newComment);
+    return newComment;
+  }
+
+  /**
+   * Get all comments for a specific organization
+   * @param organizationName - The name of the organization
+   * @returns Array of comments for the organization
+   */
+  getCommentsByOrganization(organizationName: string): Comment[] {
+    return this.comments.filter(comment => comment.organizationName === organizationName);
+  }
+
+  /**
+   * Get a specific comment by its ID
+   * @param commentId - The ID of the comment
+   * @returns The comment if found, undefined otherwise
+   */
+  getCommentById(commentId: number): Comment | undefined {
+    return this.comments.find(comment => comment.id === commentId);
+  }
+
+  /**
+   * Update an existing comment's content
+   * @param commentId - The ID of the comment to update
+   * @param newContent - The new content for the comment
+   * @returns The updated comment if found, undefined otherwise
+   */
+  updateComment(commentId: number, newContent: string): Comment | undefined {
+    const comment = this.comments.find(c => c.id === commentId);
+    if (comment) {
+      comment.content = newContent;
+      comment.updatedAt = new Date();
+      return comment;
+    }
+    return undefined;
+  }
+
+  /**
+   * Delete a comment by its ID
+   * @param commentId - The ID of the comment to delete
+   * @returns true if comment was deleted, false otherwise
+   */
+  deleteComment(commentId: number): boolean {
+    const index = this.comments.findIndex(c => c.id === commentId);
+    if (index !== -1) {
+      this.comments.splice(index, 1);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Get all comments in the system
+   * @returns Array of all comments
+   */
+  getAllComments(): Comment[] {
+    return [...this.comments];
+  }
+}
