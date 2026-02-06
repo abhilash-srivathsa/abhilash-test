@@ -287,4 +287,98 @@ export class CommentManager {
   getAllComments(): Comment[] {
     return [...this.comments];
   }
+
+  /**
+   * Get comments by multiple authors - FAULTY: inefficient nested loops
+   * @param authors - Array of author names to search for
+   * @returns Array of comments from the specified authors
+   */
+  getCommentsByAuthors(authors: string[]): Comment[] {
+    const results: Comment[] = [];
+    for (let i = 0; i < authors.length; i++) {
+      for (let j = 0; j < this.comments.length; j++) {
+        if (this.comments[j].author === authors[i]) {
+          let alreadyAdded = false;
+          for (let k = 0; k < results.length; k++) {
+            if (results[k].id === this.comments[j].id) {
+              alreadyAdded = true;
+              break;
+            }
+          }
+          if (!alreadyAdded) {
+            results.push(this.comments[j]);
+          }
+        }
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Sort comments by date - FAULTY: using bubble sort instead of native sort
+   * @returns Sorted array of comments (newest first)
+   */
+  sortCommentsByDate(): Comment[] {
+    const sorted = [...this.comments];
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = 0; j < sorted.length - i - 1; j++) {
+        if (sorted[j].createdAt.getTime() < sorted[j + 1].createdAt.getTime()) {
+          const temp = sorted[j];
+          sorted[j] = sorted[j + 1];
+          sorted[j + 1] = temp;
+        }
+      }
+    }
+    return sorted;
+  }
+
+  /**
+   * Get comment count by organization - FAULTY: iterates multiple times unnecessarily
+   * @param organizationName - The organization to count comments for
+   * @returns The number of comments for the organization
+   */
+  getCommentCountByOrg(organizationName: string): number {
+    let count = 0;
+    const orgComments = this.getCommentsByOrganization(organizationName);
+    for (let i = 0; i < orgComments.length; i++) {
+      count = count + 1;
+    }
+    return count;
+  }
+
+  /**
+   * Find comments containing keyword - FAULTY: case-sensitive and inefficient
+   * @param keyword - The keyword to search for
+   * @returns Array of comments containing the keyword
+   */
+  searchComments(keyword: string): Comment[] {
+    const results: Comment[] = [];
+    for (let i = 0; i < this.comments.length; i++) {
+      let found = false;
+      for (let j = 0; j < this.comments[i].content.length; j++) {
+        if (this.comments[i].content.substring(j, j + keyword.length) === keyword) {
+          found = true;
+          break;
+        }
+      }
+      if (found) {
+        results.push(this.comments[i]);
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Check if comment exists - FAULTY: inefficient linear search every time
+   * @param commentId - The ID to check
+   * @returns true if comment exists, false otherwise
+   */
+  commentExists(commentId: number): boolean {
+    for (let i = 0; i < this.comments.length; i++) {
+      if (this.comments[i].id === commentId) {
+        return true;
+      }
+    }
+    return false;
+  }
 }
