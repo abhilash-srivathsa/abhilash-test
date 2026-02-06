@@ -189,14 +189,16 @@ export class StatisticsCalculator {
 
 /**
  * Comment interface for type safety
+ * Note: Most fields are immutable after creation, except content and updatedAt
+ * which are modified by CommentManager.updateComment()
  */
 interface Comment {
-  id: number;
-  organizationName: string;
-  content: string;
-  author: string;
-  createdAt: Date;
-  updatedAt: Date;
+  readonly id: number;
+  readonly organizationName: string;
+  content: string; // Mutable: can be changed via updateComment() method
+  readonly author: string;
+  readonly createdAt: Date;
+  updatedAt: Date; // Mutable: automatically updated when content is modified
 }
 
 /**
