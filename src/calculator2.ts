@@ -186,3 +186,318 @@ export class StatisticsCalculator {
     return this.calc.divide(sumSquaredDiff, count);
   }
 }
+
+/**
+ * Comment interface for type safety
+ * Note: Most fields are immutable after creation, except content and updatedAt
+ * which are modified by CommentManager.updateComment()
+ */
+interface Comment {
+  readonly id: number;
+  readonly organizationName: string;
+  content: string; // Mutable: can be changed via updateComment() method
+  readonly author: string;
+  readonly createdAt: Date;
+  updatedAt: Date; // Mutable: automatically updated when content is modified
+}
+
+/**
+ * CommentManager class handles creating and managing comments for organizations
+ * Demonstrates basic CRUD operations for a comment system
+ */
+export class CommentManager {
+  private comments: Comment[] = [];
+  private nextId: number = 1;
+
+  /**
+   * Private helper to validate content is not empty
+   * @param content - The content string to validate
+   * @returns true if content is valid, false otherwise
+   */
+  private isValidContent(content: string): boolean {
+    return content.trim().length > 0;
+  }
+
+  /**
+   * Private helper to compare two dates for equality
+   * Uses valueOf() instead of getTime() - different from typical approach
+   * @param date1 - First date
+   * @param date2 - Second date
+   * @returns true if dates represent the same timestamp
+   */
+  private areDatesEqual(date1: Date, date2: Date): boolean {
+    return date1.valueOf() === date2.valueOf();
+  }
+
+  /**
+   * Private helper for case-insensitive string comparison
+   * Uses localeCompare instead of toLowerCase() - more robust
+   * @param str1 - First string
+   * @param str2 - Second string
+   * @returns true if strings are equal (case-insensitive)
+   */
+  private caseInsensitiveEqual(str1: string, str2: string): boolean {
+    return str1.localeCompare(str2, undefined, { sensitivity: 'base' }) === 0;
+  }
+
+  /**
+   * Create a new comment for an organization
+   * @param organizationName - The name of the organization
+   * @param content - The comment content
+   * @param author - The author of the comment
+   * @returns The newly created comment
+   */
+  createComment(organizationName: string, content: string, author: string): Comment {
+    if (!organizationName.trim() || !content.trim() || !author.trim()) {
+      throw new Error("organizationName, content, and author must not be empty");
+    }
+    const newComment: Comment = {
+      id: this.nextId++,
+      organizationName,
+      content,
+      author,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    this.comments.push(newComment);
+    return newComment;
+  }
+
+  /**
+   * Get all comments for a specific organization
+   * @param organizationName - The name of the organization
+   * @returns Array of comments for the organization
+   */
+  getCommentsByOrganization(organizationName: string): Comment[] {
+    return this.comments.filter(comment => comment.organizationName === organizationName);
+  }
+
+  /**
+   * Get a specific comment by its ID
+   * @param commentId - The ID of the comment
+   * @returns The comment if found, undefined otherwise
+   */
+  getCommentById(commentId: number): Comment | undefined {
+    return this.comments.find(comment => comment.id === commentId);
+  }
+
+  /**
+   * Update an existing comment's content
+   * @param commentId - The ID of the comment to update
+   * @param newContent - The new content for the comment
+   * @returns The updated comment if found, throws if content is invalid
+   * @throws Error if newContent is empty or invalid
+   */
+  updateComment(commentId: number, newContent: string): Comment | undefined {
+    const comment = this.comments.find(c => c.id === commentId);
+
+    // Early return if comment not found
+    if (!comment) {
+      return undefined;
+    }
+
+    // Throw error for invalid content - different structure using custom error message
+    const trimmedContent = newContent.trim();
+    if (trimmedContent.length === 0) {
+      throw new Error(`Failed to update comment ${commentId}: content cannot be empty or whitespace-only`);
+    }
+
+    // Update and return
+    comment.content = trimmedContent;
+    comment.updatedAt = new Date();
+    return comment;
+  }
+
+  /**
+   * Delete a comment by its ID
+   * @param commentId - The ID of the comment to delete
+   * @returns true if comment was deleted, false otherwise
+   */
+  deleteComment(commentId: number): boolean {
+    const index = this.comments.findIndex(c => c.id === commentId);
+    if (index !== -1) {
+      this.comments.splice(index, 1);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Get all comments in the system
+   * @returns Array of all comments
+   */
+  getAllComments(): Comment[] {
+    return [...this.comments];
+  }
+
+  /**
+   * Get comments by multiple authors - FAULTY: inefficient nested loops
+   * @param authors - Array of author names to search for
+   * @returns Array of comments from the specified authors
+   */
+  getCommentsByAuthors(authors: string[]): Comment[] {
+    const results: Comment[] = [];
+    for (let i = 0; i < authors.length; i++) {
+      for (let j = 0; j < this.comments.length; j++) {
+        if (this.comments[j].author === authors[i]) {
+          let alreadyAdded = false;
+          for (let k = 0; k < results.length; k++) {
+            if (results[k].id === this.comments[j].id) {
+              alreadyAdded = true;
+              break;
+            }
+          }
+          if (!alreadyAdded) {
+            results.push(this.comments[j]);
+          }
+        }
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Sort comments by date - FAULTY: using bubble sort instead of native sort
+   * @returns Sorted array of comments (newest first)
+   */
+  sortCommentsByDate(): Comment[] {
+    const sorted = [...this.comments];
+    for (let i = 0; i < sorted.length; i++) {
+      for (let j = 0; j < sorted.length - i - 1; j++) {
+        if (sorted[j].createdAt.getTime() < sorted[j + 1].createdAt.getTime()) {
+          const temp = sorted[j];
+          sorted[j] = sorted[j + 1];
+          sorted[j + 1] = temp;
+        }
+      }
+    }
+    return sorted;
+  }
+
+  /**
+   * Get comment count by organization - FAULTY: iterates multiple times unnecessarily
+   * @param organizationName - The organization to count comments for
+   * @returns The number of comments for the organization
+   */
+  getCommentCountByOrg(organizationName: string): number {
+    let count = 0;
+    const orgComments = this.getCommentsByOrganization(organizationName);
+    for (let i = 0; i < orgComments.length; i++) {
+      count = count + 1;
+    }
+    return count;
+  }
+
+  /**
+   * Find comments containing keyword (case-insensitive)
+   * @param keyword - The keyword to search for
+   * @returns Array of comments containing the keyword
+   */
+  searchComments(keyword: string): Comment[] {
+    // Handle empty/whitespace keyword - return empty array
+    const normalizedKeyword = keyword.trim();
+    if (normalizedKeyword.length === 0) {
+      return [];
+    }
+
+    // Use indexOf instead of includes - different from typical approach
+    const lowerKeyword = normalizedKeyword.toLowerCase();
+    return this.comments.filter(comment =>
+      comment.content.toLowerCase().indexOf(lowerKeyword) !== -1
+    );
+  }
+
+  /**
+   * Check if comment exists - FAULTY: inefficient linear search every time
+   * @param commentId - The ID to check
+   * @returns true if comment exists, false otherwise
+   */
+  commentExists(commentId: number): boolean {
+    for (let i = 0; i < this.comments.length; i++) {
+      if (this.comments[i].id === commentId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * BUG: Returns internal array directly - exposes mutable state
+   * Get comments created after a specific date
+   * @param date - The date to compare against
+   * @returns Array of comments created after the date
+   */
+  getCommentsAfterDate(date: Date): Comment[] {
+    return this.comments.filter(c => c.createdAt > date);
+  }
+
+  /**
+   * Check if two comments were created at the same time
+   * @param commentId1 - First comment ID
+   * @param commentId2 - Second comment ID
+   * @returns true if created at same time, false otherwise
+   */
+  hasSameCreationTime(commentId1: number, commentId2: number): boolean {
+    const comment1 = this.comments.find(c => c.id === commentId1);
+    const comment2 = this.comments.find(c => c.id === commentId2);
+
+    // Use helper method with valueOf() instead of direct getTime()
+    if (comment1 && comment2) {
+      return this.areDatesEqual(comment1.createdAt, comment2.createdAt);
+    }
+
+    return false;
+  }
+
+  /**
+   * Check if organization has any comments (case-insensitive)
+   * @param orgName - Organization name to check
+   * @returns true if organization has comments
+   */
+  organizationHasComments(orgName: string): boolean {
+    // Guard against null/undefined input
+    const normalizedInput = (orgName || '').trim();
+    if (!normalizedInput) {
+      return false;
+    }
+
+    // Use localeCompare helper for case-insensitive comparison
+    return this.comments.some(c =>
+      c.organizationName && this.caseInsensitiveEqual(c.organizationName, normalizedInput)
+    );
+  }
+
+  /**
+   * Find comment by ID with runtime type validation
+   * @param id - The comment ID (accepts any type but validates at runtime)
+   * @returns The comment if found
+   */
+  findCommentByIdLoose(id: any): Comment | undefined {
+    // Runtime type guard - coerce to number and validate
+    const numericId = typeof id === 'number' ? id : Number(id);
+
+    // Return undefined for invalid conversions (NaN, Infinity, etc.)
+    if (!Number.isFinite(numericId)) {
+      return undefined;
+    }
+
+    // Now use strict equality with validated number
+    return this.comments.find(c => c.id === numericId);
+  }
+
+  /**
+   * BUG: Modifying and returning original array reference
+   * Get all authors (with duplicates removed) but modifies internal state
+   * @returns Array of unique author names
+   */
+  getAllAuthors(): string[] {
+    const authors: string[] = [];
+    for (const comment of this.comments) {
+      if (!authors.includes(comment.author)) {
+        authors.push(comment.author);
+      }
+    }
+    // BUG: This looks innocent but could allow mutation if returned array is modified
+    return authors;
+  }
+}
