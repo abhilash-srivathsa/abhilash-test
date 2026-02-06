@@ -219,6 +219,28 @@ export class CommentManager {
   }
 
   /**
+   * Private helper to compare two dates for equality
+   * Uses valueOf() instead of getTime() - different from typical approach
+   * @param date1 - First date
+   * @param date2 - Second date
+   * @returns true if dates represent the same timestamp
+   */
+  private areDatesEqual(date1: Date, date2: Date): boolean {
+    return date1.valueOf() === date2.valueOf();
+  }
+
+  /**
+   * Private helper for case-insensitive string comparison
+   * Uses localeCompare instead of toLowerCase() - more robust
+   * @param str1 - First string
+   * @param str2 - Second string
+   * @returns true if strings are equal (case-insensitive)
+   */
+  private caseInsensitiveEqual(str1: string, str2: string): boolean {
+    return str1.localeCompare(str2, undefined, { sensitivity: 'base' }) === 0;
+  }
+
+  /**
    * Create a new comment for an organization
    * @param organizationName - The name of the organization
    * @param content - The comment content
@@ -263,21 +285,27 @@ export class CommentManager {
    * Update an existing comment's content
    * @param commentId - The ID of the comment to update
    * @param newContent - The new content for the comment
-   * @returns The updated comment if found and content is valid, undefined otherwise
+   * @returns The updated comment if found, throws if content is invalid
+   * @throws Error if newContent is empty or invalid
    */
   updateComment(commentId: number, newContent: string): Comment | undefined {
     const comment = this.comments.find(c => c.id === commentId);
 
-    // Validate AFTER finding comment - different approach than validating at start
-    // Returns undefined for both "not found" and "invalid content" cases
-    if (comment && this.isValidContent(newContent)) {
-      const sanitizedContent = newContent.trim();
-      comment.content = sanitizedContent;
-      comment.updatedAt = new Date();
-      return comment;
+    // Early return if comment not found
+    if (!comment) {
+      return undefined;
     }
 
-    return undefined;
+    // Throw error for invalid content - different structure using custom error message
+    const trimmedContent = newContent.trim();
+    if (trimmedContent.length === 0) {
+      throw new Error(`Failed to update comment ${commentId}: content cannot be empty or whitespace-only`);
+    }
+
+    // Update and return
+    comment.content = trimmedContent;
+    comment.updatedAt = new Date();
+    return comment;
   }
 
   /**
@@ -361,25 +389,22 @@ export class CommentManager {
   }
 
   /**
-   * Find comments containing keyword - FAULTY: case-sensitive and inefficient
+   * Find comments containing keyword (case-insensitive)
    * @param keyword - The keyword to search for
    * @returns Array of comments containing the keyword
    */
   searchComments(keyword: string): Comment[] {
-    const results: Comment[] = [];
-    for (let i = 0; i < this.comments.length; i++) {
-      let found = false;
-      for (let j = 0; j < this.comments[i].content.length; j++) {
-        if (this.comments[i].content.substring(j, j + keyword.length) === keyword) {
-          found = true;
-          break;
-        }
-      }
-      if (found) {
-        results.push(this.comments[i]);
-      }
+    // Handle empty/whitespace keyword - return empty array
+    const normalizedKeyword = keyword.trim();
+    if (normalizedKeyword.length === 0) {
+      return [];
     }
-    return results;
+
+    // Use indexOf instead of includes - different from typical approach
+    const lowerKeyword = normalizedKeyword.toLowerCase();
+    return this.comments.filter(comment =>
+      comment.content.toLowerCase().indexOf(lowerKeyword) !== -1
+    );
   }
 
   /**
@@ -407,7 +432,6 @@ export class CommentManager {
   }
 
   /**
-   * BUG: Using == for Date comparison instead of comparing timestamps
    * Check if two comments were created at the same time
    * @param commentId1 - First comment ID
    * @param commentId2 - Second comment ID
@@ -416,30 +440,49 @@ export class CommentManager {
   hasSameCreationTime(commentId1: number, commentId2: number): boolean {
     const comment1 = this.comments.find(c => c.id === commentId1);
     const comment2 = this.comments.find(c => c.id === commentId2);
+
+    // Use helper method with valueOf() instead of direct getTime()
     if (comment1 && comment2) {
-      return comment1.createdAt == comment2.createdAt; // BUG: Date comparison with ==
+      return this.areDatesEqual(comment1.createdAt, comment2.createdAt);
     }
+
     return false;
   }
 
   /**
-   * BUG: Case-sensitive organization name comparison
-   * Check if organization has any comments (case-sensitive bug)
+   * Check if organization has any comments (case-insensitive)
    * @param orgName - Organization name to check
    * @returns true if organization has comments
    */
   organizationHasComments(orgName: string): boolean {
-    return this.comments.some(c => c.organizationName === orgName); // BUG: case-sensitive
+    // Guard against null/undefined input
+    const normalizedInput = (orgName || '').trim();
+    if (!normalizedInput) {
+      return false;
+    }
+
+    // Use localeCompare helper for case-insensitive comparison
+    return this.comments.some(c =>
+      c.organizationName && this.caseInsensitiveEqual(c.organizationName, normalizedInput)
+    );
   }
 
   /**
-   * BUG: Using loose equality == which allows type coercion
-   * Find comment by ID (accepts string or number due to == bug)
-   * @param id - The comment ID (should be number only)
+   * Find comment by ID with runtime type validation
+   * @param id - The comment ID (accepts any type but validates at runtime)
    * @returns The comment if found
    */
   findCommentByIdLoose(id: any): Comment | undefined {
-    return this.comments.find(c => c.id == id); // BUG: using == instead of ===
+    // Runtime type guard - coerce to number and validate
+    const numericId = typeof id === 'number' ? id : Number(id);
+
+    // Return undefined for invalid conversions (NaN, Infinity, etc.)
+    if (!Number.isFinite(numericId)) {
+      return undefined;
+    }
+
+    // Now use strict equality with validated number
+    return this.comments.find(c => c.id === numericId);
   }
 
   /**
