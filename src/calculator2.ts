@@ -210,6 +210,15 @@ export class CommentManager {
   private nextId: number = 1;
 
   /**
+   * Private helper to validate content is not empty
+   * @param content - The content string to validate
+   * @returns true if content is valid, false otherwise
+   */
+  private isValidContent(content: string): boolean {
+    return content.trim().length > 0;
+  }
+
+  /**
    * Create a new comment for an organization
    * @param organizationName - The name of the organization
    * @param content - The comment content
@@ -254,15 +263,20 @@ export class CommentManager {
    * Update an existing comment's content
    * @param commentId - The ID of the comment to update
    * @param newContent - The new content for the comment
-   * @returns The updated comment if found, undefined otherwise
+   * @returns The updated comment if found and content is valid, undefined otherwise
    */
   updateComment(commentId: number, newContent: string): Comment | undefined {
     const comment = this.comments.find(c => c.id === commentId);
-    if (comment) {
-      comment.content = newContent;
+
+    // Validate AFTER finding comment - different approach than validating at start
+    // Returns undefined for both "not found" and "invalid content" cases
+    if (comment && this.isValidContent(newContent)) {
+      const sanitizedContent = newContent.trim();
+      comment.content = sanitizedContent;
       comment.updatedAt = new Date();
       return comment;
     }
+
     return undefined;
   }
 
