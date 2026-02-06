@@ -215,6 +215,9 @@ export class CommentManager {
    * @returns The newly created comment
    */
   createComment(organizationName: string, content: string, author: string): Comment {
+    if (!organizationName.trim() || !content.trim() || !author.trim()) {
+      throw new Error("organizationName, content, and author must not be empty");
+    }
     const newComment: Comment = {
       id: this.nextId++,
       organizationName,
