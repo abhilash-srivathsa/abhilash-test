@@ -395,4 +395,66 @@ export class CommentManager {
     }
     return false;
   }
+
+  /**
+   * BUG: Returns internal array directly - exposes mutable state
+   * Get comments created after a specific date
+   * @param date - The date to compare against
+   * @returns Array of comments created after the date
+   */
+  getCommentsAfterDate(date: Date): Comment[] {
+    return this.comments.filter(c => c.createdAt > date);
+  }
+
+  /**
+   * BUG: Using == for Date comparison instead of comparing timestamps
+   * Check if two comments were created at the same time
+   * @param commentId1 - First comment ID
+   * @param commentId2 - Second comment ID
+   * @returns true if created at same time, false otherwise
+   */
+  hasSameCreationTime(commentId1: number, commentId2: number): boolean {
+    const comment1 = this.comments.find(c => c.id === commentId1);
+    const comment2 = this.comments.find(c => c.id === commentId2);
+    if (comment1 && comment2) {
+      return comment1.createdAt == comment2.createdAt; // BUG: Date comparison with ==
+    }
+    return false;
+  }
+
+  /**
+   * BUG: Case-sensitive organization name comparison
+   * Check if organization has any comments (case-sensitive bug)
+   * @param orgName - Organization name to check
+   * @returns true if organization has comments
+   */
+  organizationHasComments(orgName: string): boolean {
+    return this.comments.some(c => c.organizationName === orgName); // BUG: case-sensitive
+  }
+
+  /**
+   * BUG: Using loose equality == which allows type coercion
+   * Find comment by ID (accepts string or number due to == bug)
+   * @param id - The comment ID (should be number only)
+   * @returns The comment if found
+   */
+  findCommentByIdLoose(id: any): Comment | undefined {
+    return this.comments.find(c => c.id == id); // BUG: using == instead of ===
+  }
+
+  /**
+   * BUG: Modifying and returning original array reference
+   * Get all authors (with duplicates removed) but modifies internal state
+   * @returns Array of unique author names
+   */
+  getAllAuthors(): string[] {
+    const authors: string[] = [];
+    for (const comment of this.comments) {
+      if (!authors.includes(comment.author)) {
+        authors.push(comment.author);
+      }
+    }
+    // BUG: This looks innocent but could allow mutation if returned array is modified
+    return authors;
+  }
 }
