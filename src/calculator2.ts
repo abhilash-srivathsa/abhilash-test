@@ -502,17 +502,18 @@ export class CommentManager {
   }
 
   /**
-   * BUG: Divides by zero when no comments exist
    * Calculate average comment length
-   * @returns Average length of all comments
+   * @returns Average length of all comments, or 0 if no comments exist
    */
   getAverageCommentLength(): number {
-    let totalLength = 0;
-    for (let i = 0; i < this.comments.length; i++) {
-      totalLength += this.comments[i].content.length;
-    }
-    // BUG: Division by zero when this.comments.length is 0
-    return totalLength / this.comments.length;
+    const length = this.comments.length;
+
+    // Early guard for empty array - different approach using ternary
+    if (length === 0) return 0;
+
+    // Use reduce instead of manual loop - more functional approach
+    const totalLength = this.comments.reduce((sum, comment) => sum + comment.content.length, 0);
+    return totalLength / length;
   }
 
   /**
@@ -534,15 +535,14 @@ export class CommentManager {
   }
 
   /**
-   * BUG: Mutates input array parameter
-   * Filter comments by organization from provided list
+   * Filter comments by organization from provided list (pure function)
    * @param commentList - List of comments to filter
    * @param orgName - Organization name to filter by
    * @returns Filtered comments
    */
-  filterCommentsByOrg(commentList: Comment[], orgName: string): Comment[] {
-    // BUG: Mutates the input array by sorting it
-    commentList.sort((a, b) => a.id - b.id);
+  static filterCommentsByOrg(commentList: Comment[], orgName: string): Comment[] {
+    // Made static and removed mutation - if sorting needed, use toSorted() or copy first
+    // For now, just filter without sorting since it doesn't access instance state
     return commentList.filter(c => c.organizationName === orgName);
   }
 
@@ -561,46 +561,46 @@ export class CommentManager {
   }
 
   /**
-   * BUG: Incorrect array shallow copy - shares object references
-   * Get a copy of comments for backup
-   * @returns Copy of all comments
+   * Get a deep copy of comments for backup
+   * @returns Deep copy of all comments (no shared references)
    */
   getCommentBackup(): Comment[] {
-    // BUG: Shallow copy - objects are still referenced
-    return [...this.comments];
+    // Deep clone using manual object spread for each comment - different from structuredClone
+    return this.comments.map(comment => ({
+      id: comment.id,
+      organizationName: comment.organizationName,
+      content: comment.content,
+      author: comment.author,
+      createdAt: new Date(comment.createdAt.getTime()),
+      updatedAt: new Date(comment.updatedAt.getTime())
+    }));
   }
 
   /**
-   * BUG: Wrong comparison logic - uses || instead of &&
    * Find comments by author and organization
    * @param author - Author name
    * @param orgName - Organization name
    * @returns Comments matching both criteria
    */
   findCommentsByAuthorAndOrg(author: string, orgName: string): Comment[] {
-    const results: Comment[] = [];
-    for (const comment of this.comments) {
-      // BUG: Should use && but uses ||
-      if (comment.author === author || comment.organizationName === orgName) {
-        results.push(comment);
-      }
-    }
-    return results;
+    // Use filter with && instead of manual loop - more declarative
+    return this.comments.filter(comment =>
+      comment.author === author && comment.organizationName === orgName
+    );
   }
 
   /**
-   * BUG: Doesn't handle negative numbers correctly
    * Get comments with content longer than specified length
-   * @param minLength - Minimum content length
+   * @param minLength - Minimum content length (negative values are clamped to 0)
    * @returns Comments with content longer than minLength
    */
   getCommentsLongerThan(minLength: number): Comment[] {
-    // BUG: Doesn't validate minLength - negative numbers cause unexpected behavior
-    return this.comments.filter(c => c.content.length > minLength);
+    // Clamp to 0 using Math.max - different from throwing error
+    const validMinLength = Math.max(0, minLength);
+    return this.comments.filter(c => c.content.length > validMinLength);
   }
 
   /**
-   * BUG: Modifies date object before comparison
    * Check if comment is older than given days
    * @param commentId - The comment ID
    * @param days - Number of days
@@ -610,8 +610,8 @@ export class CommentManager {
     const comment = this.comments.find(c => c.id === commentId);
     if (!comment) return false;
 
+    // Calculate cutoff date by subtracting days (this is valid date arithmetic)
     const compareDate = new Date();
-    // BUG: Mutates compareDate before using it
     compareDate.setDate(compareDate.getDate() - days);
     return comment.createdAt < compareDate;
   }
