@@ -500,4 +500,151 @@ export class CommentManager {
     // BUG: This looks innocent but could allow mutation if returned array is modified
     return authors;
   }
+
+  /**
+   * BUG: Divides by zero when no comments exist
+   * Calculate average comment length
+   * @returns Average length of all comments
+   */
+  getAverageCommentLength(): number {
+    let totalLength = 0;
+    for (let i = 0; i < this.comments.length; i++) {
+      totalLength += this.comments[i].content.length;
+    }
+    // BUG: Division by zero when this.comments.length is 0
+    return totalLength / this.comments.length;
+  }
+
+  /**
+   * BUG: Off-by-one error - misses last comment
+   * Get the last N comments
+   * @param count - Number of comments to retrieve
+   * @returns Array of last N comments
+   */
+  getLastNComments(count: number): Comment[] {
+    const result: Comment[] = [];
+    const startIndex = this.comments.length - count;
+    // BUG: Loop condition should be < this.comments.length, not <= startIndex + count - 1
+    for (let i = startIndex; i <= startIndex + count - 1; i++) {
+      if (i >= 0) {
+        result.push(this.comments[i]);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * BUG: Mutates input array parameter
+   * Filter comments by organization from provided list
+   * @param commentList - List of comments to filter
+   * @param orgName - Organization name to filter by
+   * @returns Filtered comments
+   */
+  filterCommentsByOrg(commentList: Comment[], orgName: string): Comment[] {
+    // BUG: Mutates the input array by sorting it
+    commentList.sort((a, b) => a.id - b.id);
+    return commentList.filter(c => c.organizationName === orgName);
+  }
+
+  /**
+   * BUG: String concatenation in loop - performance issue
+   * Generate a summary of all comments
+   * @returns Summary string
+   */
+  generateCommentSummary(): string {
+    let summary = "";
+    // BUG: String concatenation in loop - should use array and join
+    for (let i = 0; i < this.comments.length; i++) {
+      summary += `Comment ${this.comments[i].id}: ${this.comments[i].content}\n`;
+    }
+    return summary;
+  }
+
+  /**
+   * BUG: Incorrect array shallow copy - shares object references
+   * Get a copy of comments for backup
+   * @returns Copy of all comments
+   */
+  getCommentBackup(): Comment[] {
+    // BUG: Shallow copy - objects are still referenced
+    return [...this.comments];
+  }
+
+  /**
+   * BUG: Wrong comparison logic - uses || instead of &&
+   * Find comments by author and organization
+   * @param author - Author name
+   * @param orgName - Organization name
+   * @returns Comments matching both criteria
+   */
+  findCommentsByAuthorAndOrg(author: string, orgName: string): Comment[] {
+    const results: Comment[] = [];
+    for (const comment of this.comments) {
+      // BUG: Should use && but uses ||
+      if (comment.author === author || comment.organizationName === orgName) {
+        results.push(comment);
+      }
+    }
+    return results;
+  }
+
+  /**
+   * BUG: Doesn't handle negative numbers correctly
+   * Get comments with content longer than specified length
+   * @param minLength - Minimum content length
+   * @returns Comments with content longer than minLength
+   */
+  getCommentsLongerThan(minLength: number): Comment[] {
+    // BUG: Doesn't validate minLength - negative numbers cause unexpected behavior
+    return this.comments.filter(c => c.content.length > minLength);
+  }
+
+  /**
+   * BUG: Modifies date object before comparison
+   * Check if comment is older than given days
+   * @param commentId - The comment ID
+   * @param days - Number of days
+   * @returns true if comment is older than specified days
+   */
+  isCommentOlderThan(commentId: number, days: number): boolean {
+    const comment = this.comments.find(c => c.id === commentId);
+    if (!comment) return false;
+
+    const compareDate = new Date();
+    // BUG: Mutates compareDate before using it
+    compareDate.setDate(compareDate.getDate() - days);
+    return comment.createdAt < compareDate;
+  }
+
+  /**
+   * BUG: Uses == for null check which also catches undefined
+   * Count comments with specific content
+   * @param content - Content to match (null means count all)
+   * @returns Count of matching comments
+   */
+  countCommentsByContent(content: string | null): number {
+    let count = 0;
+    for (const comment of this.comments) {
+      // BUG: Using == catches both null and undefined
+      if (content == null || comment.content === content) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * BUG: Redundant filtering - filters twice unnecessarily
+   * Get recent comments from specific organization
+   * @param orgName - Organization name
+   * @param hoursAgo - Number of hours to look back
+   * @returns Recent comments from the organization
+   */
+  getRecentOrgComments(orgName: string, hoursAgo: number): Comment[] {
+    // BUG: Filters all comments first, then filters again - inefficient
+    const orgComments = this.comments.filter(c => c.organizationName === orgName);
+    const cutoffTime = new Date(Date.now() - hoursAgo * 60 * 60 * 1000);
+    const recentComments = orgComments.filter(c => c.createdAt > cutoffTime);
+    return recentComments;
+  }
 }
