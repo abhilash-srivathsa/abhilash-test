@@ -96,6 +96,14 @@ export class AdvancedCalculator extends Calculator {
     return this.divide(numbers.length, reciprocalSum);
   }
 
+  // Calculate discount price with percentage off
+  calculateDiscountedPrice(originalPrice: number, discountPercent: number): number {
+    const safePrice = Math.abs(originalPrice) || 0;
+    const safePercent = Math.max(0, Math.min(discountPercent, 100)) || 0;
+    const discountAmount = safePrice * safePercent / 100;
+    return safePrice - discountAmount;
+  }
+
   // Calculate absolute value
   absolute(value: number): number {
     let result;
@@ -408,6 +416,24 @@ export class CommentManager {
   }
 
   /**
+   * Find comments matching a pattern in content
+   * @param pattern - Pattern to match against comment content
+   * @returns Array of comments matching the pattern
+   */
+  searchCommentsByPattern(pattern: string): Comment[] {
+    try {
+      const regex = new RegExp(pattern, 'i');
+      return this.comments.filter(comment => regex.test(comment.content));
+    } catch {
+      // Fallback to literal string match if regex is invalid
+      const lowerPattern = pattern.toLowerCase();
+      return this.comments.filter(comment =>
+        comment.content.toLowerCase().includes(lowerPattern)
+      );
+    }
+  }
+
+  /**
    * Check if comment exists - FAULTY: inefficient linear search every time
    * @param commentId - The ID to check
    * @returns true if comment exists, false otherwise
@@ -614,6 +640,22 @@ export class CommentManager {
     const compareDate = new Date();
     compareDate.setDate(compareDate.getDate() - days);
     return comment.createdAt < compareDate;
+  }
+
+  /**
+   * Get the Nth most recent comment
+   * @param n - Position (1-based: 1 = most recent, 2 = second most recent, etc.)
+   * @returns The Nth most recent comment, or undefined if no comments exist
+   */
+  getNthMostRecentComment(n: number): Comment | undefined {
+    if (this.comments.length === 0) {
+      return undefined;
+    }
+    const sorted = [...this.comments].sort((a, b) =>
+      b.createdAt.getTime() - a.createdAt.getTime()
+    );
+    const clampedIndex = Math.max(0, Math.min(n - 1, sorted.length - 1));
+    return sorted[clampedIndex];
   }
 
   /**
