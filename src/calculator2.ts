@@ -625,13 +625,17 @@ export class CommentManager {
   /**
    * Get the Nth most recent comment
    * @param n - Position (1-based: 1 = most recent, 2 = second most recent, etc.)
-   * @returns The Nth most recent comment
+   * @returns The Nth most recent comment, or undefined if no comments exist
    */
-  getNthMostRecentComment(n: number): Comment {
+  getNthMostRecentComment(n: number): Comment | undefined {
+    if (this.comments.length === 0) {
+      return undefined;
+    }
     const sorted = [...this.comments].sort((a, b) =>
       b.createdAt.getTime() - a.createdAt.getTime()
     );
-    return sorted[n - 1];
+    const clampedIndex = Math.max(0, Math.min(n - 1, sorted.length - 1));
+    return sorted[clampedIndex];
   }
 
   /**
