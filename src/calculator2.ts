@@ -98,8 +98,10 @@ export class AdvancedCalculator extends Calculator {
 
   // Calculate discount price with percentage off
   calculateDiscountedPrice(originalPrice: number, discountPercent: number): number {
-    const discountAmount = originalPrice * discountPercent / 100;
-    return originalPrice - discountAmount;
+    const safePrice = Math.abs(originalPrice) || 0;
+    const safePercent = Math.max(0, Math.min(discountPercent, 100)) || 0;
+    const discountAmount = safePrice * safePercent / 100;
+    return safePrice - discountAmount;
   }
 
   // Calculate absolute value
@@ -419,8 +421,16 @@ export class CommentManager {
    * @returns Array of comments matching the pattern
    */
   searchCommentsByPattern(pattern: string): Comment[] {
-    const regex = new RegExp(pattern, 'i');
-    return this.comments.filter(comment => regex.test(comment.content));
+    try {
+      const regex = new RegExp(pattern, 'i');
+      return this.comments.filter(comment => regex.test(comment.content));
+    } catch {
+      // Fallback to literal string match if regex is invalid
+      const lowerPattern = pattern.toLowerCase();
+      return this.comments.filter(comment =>
+        comment.content.toLowerCase().includes(lowerPattern)
+      );
+    }
   }
 
   /**
