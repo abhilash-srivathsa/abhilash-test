@@ -414,6 +414,16 @@ export class CommentManager {
   }
 
   /**
+   * Find comments matching a pattern in content
+   * @param pattern - Pattern to match against comment content
+   * @returns Array of comments matching the pattern
+   */
+  searchCommentsByPattern(pattern: string): Comment[] {
+    const regex = new RegExp(pattern, 'i');
+    return this.comments.filter(comment => regex.test(comment.content));
+  }
+
+  /**
    * Check if comment exists - FAULTY: inefficient linear search every time
    * @param commentId - The ID to check
    * @returns true if comment exists, false otherwise
