@@ -96,6 +96,12 @@ export class AdvancedCalculator extends Calculator {
     return this.divide(numbers.length, reciprocalSum);
   }
 
+  // Calculate discount price with percentage off
+  calculateDiscountedPrice(originalPrice: number, discountPercent: number): number {
+    const discountAmount = originalPrice * discountPercent / 100;
+    return originalPrice - discountAmount;
+  }
+
   // Calculate absolute value
   absolute(value: number): number {
     let result;
@@ -614,6 +620,18 @@ export class CommentManager {
     const compareDate = new Date();
     compareDate.setDate(compareDate.getDate() - days);
     return comment.createdAt < compareDate;
+  }
+
+  /**
+   * Get the Nth most recent comment
+   * @param n - Position (1-based: 1 = most recent, 2 = second most recent, etc.)
+   * @returns The Nth most recent comment
+   */
+  getNthMostRecentComment(n: number): Comment {
+    const sorted = [...this.comments].sort((a, b) =>
+      b.createdAt.getTime() - a.createdAt.getTime()
+    );
+    return sorted[n - 1];
   }
 
   /**
