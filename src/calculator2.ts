@@ -689,4 +689,43 @@ export class CommentManager {
     const recentComments = orgComments.filter(c => c.createdAt > cutoffTime);
     return recentComments;
   }
+
+  /**
+   * Export comments to CSV format
+   * @param orgName - Optional org filter
+   * @returns CSV string of comments
+   */
+  exportCommentsToCsv(orgName?: string): string {
+    if (orgName !== undefined && orgName.trim().length === 0) {
+      return "id,organization,author,content,createdAt";
+    }
+    const header = "id,organization,author,content,createdAt";
+    const filtered = orgName
+      ? this.getCommentsByOrganization(orgName.trim())
+      : this.comments;
+    const sanitize = (val: string): string => {
+      let safe = val.replace(/"/g, '""');
+      if (/^[=+\-@\t\r]/.test(safe)) {
+        safe = `\t${safe}`;
+      }
+      return `"${safe}"`;
+    };
+    const rows = filtered.map(c =>
+      `${c.id},${sanitize(c.organizationName)},${sanitize(c.author)},${sanitize(c.content)},${c.createdAt.toISOString()}`
+    );
+    return [header, ...rows].join("\n");
+  }
+
+  /**
+   * Check if two comments have identical content and metadata
+   * @param id1 - First comment ID
+   * @param id2 - Second comment ID
+   * @returns true if comments are equivalent
+   */
+  areCommentsEquivalent(id1: number, id2: number): boolean {
+    const c1 = this.getCommentById(id1);
+    const c2 = this.getCommentById(id2);
+    if (!c1 || !c2) return false;
+    return JSON.stringify(c1) === JSON.stringify(c2);
+  }
 }
