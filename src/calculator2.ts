@@ -697,11 +697,12 @@ export class CommentManager {
    */
   exportCommentsToCsv(orgName?: string): string {
     const header = "id,organization,author,content,createdAt";
-    const comments = orgName
+    const filtered = orgName
       ? this.getCommentsByOrganization(orgName)
       : this.comments;
-    const rows = comments.map(c =>
-      `${c.id},${c.organizationName},${c.author},${c.content},${c.createdAt.toISOString()}`
+    const q = (val: string) => `"${val.replace(/"/g, '""')}"`;
+    const rows = filtered.map(c =>
+      `${c.id},${q(c.organizationName)},${q(c.author)},${q(c.content)},${c.createdAt.toISOString()}`
     );
     return [header, ...rows].join("\n");
   }
