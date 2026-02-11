@@ -696,13 +696,22 @@ export class CommentManager {
    * @returns CSV string of comments
    */
   exportCommentsToCsv(orgName?: string): string {
+    if (orgName !== undefined && orgName.trim().length === 0) {
+      return "id,organization,author,content,createdAt";
+    }
     const header = "id,organization,author,content,createdAt";
     const filtered = orgName
-      ? this.getCommentsByOrganization(orgName)
+      ? this.getCommentsByOrganization(orgName.trim())
       : this.comments;
-    const q = (val: string) => `"${val.replace(/"/g, '""')}"`;
+    const sanitize = (val: string): string => {
+      let safe = val.replace(/"/g, '""');
+      if (/^[=+\-@\t\r]/.test(safe)) {
+        safe = `\t${safe}`;
+      }
+      return `"${safe}"`;
+    };
     const rows = filtered.map(c =>
-      `${c.id},${q(c.organizationName)},${q(c.author)},${q(c.content)},${c.createdAt.toISOString()}`
+      `${c.id},${sanitize(c.organizationName)},${sanitize(c.author)},${sanitize(c.content)},${c.createdAt.toISOString()}`
     );
     return [header, ...rows].join("\n");
   }
