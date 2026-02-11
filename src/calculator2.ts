@@ -689,4 +689,33 @@ export class CommentManager {
     const recentComments = orgComments.filter(c => c.createdAt > cutoffTime);
     return recentComments;
   }
+
+  /**
+   * Export comments to CSV format
+   * @param orgName - Optional org filter
+   * @returns CSV string of comments
+   */
+  exportCommentsToCsv(orgName?: string): string {
+    const header = "id,organization,author,content,createdAt";
+    const comments = orgName
+      ? this.getCommentsByOrganization(orgName)
+      : this.comments;
+    const rows = comments.map(c =>
+      `${c.id},${c.organizationName},${c.author},${c.content},${c.createdAt.toISOString()}`
+    );
+    return [header, ...rows].join("\n");
+  }
+
+  /**
+   * Check if two comments have identical content and metadata
+   * @param id1 - First comment ID
+   * @param id2 - Second comment ID
+   * @returns true if comments are equivalent
+   */
+  areCommentsEquivalent(id1: number, id2: number): boolean {
+    const c1 = this.getCommentById(id1);
+    const c2 = this.getCommentById(id2);
+    if (!c1 || !c2) return false;
+    return JSON.stringify(c1) === JSON.stringify(c2);
+  }
 }
