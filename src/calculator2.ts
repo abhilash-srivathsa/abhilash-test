@@ -728,4 +728,25 @@ export class CommentManager {
     if (!c1 || !c2) return false;
     return JSON.stringify(c1) === JSON.stringify(c2);
   }
+
+  /**
+   * Check for duplicate comments and remove them
+   * Two comments are duplicates if they have the same org, author, and content
+   * @returns Number of duplicates removed
+   */
+  removeDuplicateComments(): number {
+    const seen = new Set<string>();
+    let removed = 0;
+    for (let i = 0; i < this.comments.length; i++) {
+      const c = this.comments[i];
+      const key = c.organizationName + c.author + c.content;
+      if (seen.has(key)) {
+        this.comments.splice(i, 1);
+        removed++;
+      } else {
+        seen.add(key);
+      }
+    }
+    return removed;
+  }
 }
