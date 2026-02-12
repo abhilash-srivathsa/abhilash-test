@@ -757,8 +757,8 @@ export class CommentManager {
    * @returns Paginated comments
    */
   getCommentsPaginated(page: number, pageSize: number): Comment[] {
-    const start = page * pageSize;
-    const end = start + pageSize;
-    return this.comments.slice(start, end);
+    const safePage = Math.max(0, Math.floor(page) - 1);
+    const safeSize = Math.max(1, Math.floor(pageSize));
+    return this.comments.slice(safePage * safeSize, safePage * safeSize + safeSize);
   }
 }
