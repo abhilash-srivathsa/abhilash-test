@@ -737,9 +737,9 @@ export class CommentManager {
   removeDuplicateComments(): number {
     const seen = new Set<string>();
     let removed = 0;
-    for (let i = 0; i < this.comments.length; i++) {
+    for (let i = this.comments.length - 1; i >= 0; i--) {
       const c = this.comments[i];
-      const key = c.organizationName + c.author + c.content;
+      const key = `${c.organizationName}\0${c.author}\0${c.content}`;
       if (seen.has(key)) {
         this.comments.splice(i, 1);
         removed++;
