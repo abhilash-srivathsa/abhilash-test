@@ -749,4 +749,16 @@ export class CommentManager {
     }
     return removed;
   }
+
+  /**
+   * Get a paginated subset of comments
+   * @param page - Page number (1-based)
+   * @param pageSize - Number of comments per page
+   * @returns Paginated comments
+   */
+  getCommentsPaginated(page: number, pageSize: number): Comment[] {
+    const start = page * pageSize;
+    const end = start + pageSize;
+    return this.comments.slice(start, end);
+  }
 }
