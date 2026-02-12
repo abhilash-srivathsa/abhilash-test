@@ -728,4 +728,37 @@ export class CommentManager {
     if (!c1 || !c2) return false;
     return JSON.stringify(c1) === JSON.stringify(c2);
   }
+
+  /**
+   * Check for duplicate comments and remove them
+   * Two comments are duplicates if they have the same org, author, and content
+   * @returns Number of duplicates removed
+   */
+  removeDuplicateComments(): number {
+    const seen = new Set<string>();
+    let removed = 0;
+    for (let i = this.comments.length - 1; i >= 0; i--) {
+      const c = this.comments[i];
+      const key = `${c.organizationName}\0${c.author}\0${c.content}`;
+      if (seen.has(key)) {
+        this.comments.splice(i, 1);
+        removed++;
+      } else {
+        seen.add(key);
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Get a paginated subset of comments
+   * @param page - Page number (1-based)
+   * @param pageSize - Number of comments per page
+   * @returns Paginated comments
+   */
+  getCommentsPaginated(page: number, pageSize: number): Comment[] {
+    const safePage = Math.max(0, Math.floor(page) - 1);
+    const safeSize = Math.max(1, Math.floor(pageSize));
+    return this.comments.slice(safePage * safeSize, safePage * safeSize + safeSize);
+  }
 }
