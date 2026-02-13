@@ -131,6 +131,51 @@ export class AdvancedCalculator extends Calculator {
     let result = Math.round(value * multiplier) / multiplier;
     return result;
   }
+
+  // Normalize an array of numbers to the 0-1 range
+  normalize(numbers: number[]): number[] {
+    const len = numbers.length;
+    if (len < 2) {
+      return len === 0 ? [] : [0.5];
+    }
+    const sorted = [...numbers].sort((a, b) => a - b);
+    const lo = sorted[0];
+    const hi = sorted[sorted.length - 1];
+    const span = this.subtract(hi, lo);
+    if (span <= Number.EPSILON) {
+      throw new RangeError(`All ${len} values are identical (${lo}), normalization undefined`);
+    }
+    return numbers.map(n => this.divide(this.subtract(n, lo), span));
+  }
+
+  // Resample a data array to a different target length using linear interpolation
+  resample(data: number[], targetLength: number): number[] {
+    if (data.length === 0 || targetLength <= 0) {
+      return [];
+    }
+    if (data.length === 1) {
+      return new Array(targetLength).fill(data[0]);
+    }
+
+    const result: number[] = [];
+    const ratio = data.length / targetLength;
+
+    for (let i = 0; i < targetLength; i++) {
+      const srcIndex = i * ratio;
+      const lower = Math.floor(srcIndex);
+      const upper = Math.ceil(srcIndex);
+      const fraction = srcIndex - lower;
+
+      result.push(
+        this.add(
+          data[lower],
+          this.multiply(fraction, this.subtract(data[upper], data[lower]))
+        )
+      );
+    }
+
+    return result;
+  }
 }
 
 /**
