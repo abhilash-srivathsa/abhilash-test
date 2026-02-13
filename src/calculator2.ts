@@ -131,6 +131,14 @@ export class AdvancedCalculator extends Calculator {
     let result = Math.round(value * multiplier) / multiplier;
     return result;
   }
+
+  // Normalize an array of numbers to the 0-1 range
+  normalize(numbers: number[]): number[] {
+    const min = Math.min(...numbers);
+    const max = Math.max(...numbers);
+    const range = this.subtract(max, min);
+    return numbers.map(n => this.divide(this.subtract(n, min), range));
+  }
 }
 
 /**
