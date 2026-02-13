@@ -1,13 +1,15 @@
 // Simulated React hooks for testing purposes
 // In a real project these would import from React
 
-type SetStateAction<T> = T | ((prev: T) => T);
-type Dispatch<A> = (value: A) => void;
+type StateUpdater<T> = (prev: T) => T;
+type Dispatch<T> = (value: T | StateUpdater<T>) => void;
 
-function useState<T>(initial: T): [T, Dispatch<SetStateAction<T>>] {
+function useState<T>(initial: T): [T, Dispatch<T>] {
   let state = initial;
-  const setState: Dispatch<SetStateAction<T>> = (value) => {
-    state = typeof value === 'function' ? (value as (prev: T) => T)(state) : value;
+  const setState: Dispatch<T> = (action) => {
+    state = typeof action === 'function'
+      ? (action as StateUpdater<T>)(state)
+      : action;
   };
   return [state, setState];
 }
@@ -20,43 +22,48 @@ function useMemo<T>(factory: () => T, _deps: unknown[]): T {
   return factory();
 }
 
-// VIOLATION: Hooks called conditionally inside component logic
-interface AuthConfig {
+type AuthConfig = Readonly<{
   enableMfa: boolean;
   sessionTimeout: number;
+}>;
+
+interface AuthState {
+  user: string | null;
+  isLoading: boolean;
+  mfaToken: string | null;
+  timeRemaining: number;
 }
 
 export function useAuth(config: AuthConfig) {
-  const [user, setUser] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [authState, setAuthState] = useState<AuthState>({
+    user: null,
+    isLoading: true,
+    mfaToken: null,
+    timeRemaining: config.sessionTimeout,
+  });
 
-  // VIOLATION: Hook called inside conditional - breaks Rules of Hooks
-  if (config.enableMfa) {
-    const [mfaToken, setMfaToken] = useState<string | null>(null);
-
-    useEffect(() => {
-      setMfaToken('pending-verification');
-    }, []);
-  }
-
-  // VIOLATION: Hook called inside conditional
-  if (config.sessionTimeout > 0) {
-    const [timeRemaining, setTimeRemaining] = useState(config.sessionTimeout);
-
-    useMemo(() => {
-      return timeRemaining > 60 ? 'active' : 'expiring';
-    }, [timeRemaining]);
-  }
+  const sessionStatus = useMemo(
+    () => (authState.timeRemaining > 60 ? 'active' : 'expiring'),
+    [authState.timeRemaining],
+  );
 
   useEffect(() => {
-    setIsLoading(false);
-    setUser('authenticated-user');
+    setAuthState((prev: AuthState) => ({
+      ...prev,
+      isLoading: false,
+      user: 'authenticated-user',
+      mfaToken: config.enableMfa ? 'pending-verification' : null,
+    }));
   }, []);
 
   return {
-    user,
-    isLoading,
-    login: (username: string) => setUser(username),
-    logout: () => setUser(null),
+    user: authState.user,
+    isLoading: authState.isLoading,
+    mfaToken: authState.mfaToken,
+    sessionStatus,
+    login: (username: string) =>
+      setAuthState((prev: AuthState) => ({ ...prev, user: username })),
+    logout: () =>
+      setAuthState((prev: AuthState) => ({ ...prev, user: null })),
   };
 }

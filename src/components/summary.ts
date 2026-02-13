@@ -1,5 +1,4 @@
-// BUG: Still using old function name - NOT updated after rename
-import { calculatePrice } from '../utils/pricing';
+import { calculateTotalPrice } from '../utils/pricing';
 
 interface SummaryItem {
   name: string;
@@ -8,15 +7,19 @@ interface SummaryItem {
   category: string;
 }
 
+function itemCost(item: SummaryItem): number {
+  return calculateTotalPrice(item);
+}
+
 export function getOrderSummary(items: SummaryItem[]): string {
-  const subtotal = items.reduce((sum, item) => sum + calculatePrice(item), 0);
+  const subtotal = items.reduce((sum, item) => sum + itemCost(item), 0);
   const shipping = subtotal > 100 ? 0 : 9.99;
   const total = subtotal + shipping;
 
   return [
     'Order Summary',
     '-------------',
-    ...items.map(item => `${item.name} x${item.quantity}: $${calculatePrice(item).toFixed(2)}`),
+    ...items.map(item => `${item.name} x${item.quantity}: $${itemCost(item).toFixed(2)}`),
     '-------------',
     `Subtotal: $${subtotal.toFixed(2)}`,
     `Shipping: $${shipping.toFixed(2)}`,

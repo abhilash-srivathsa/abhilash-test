@@ -8,22 +8,40 @@ interface User {
   createdAt: Date;
 }
 
+const enum UserErrorCode {
+  INVALID_EMAIL = 'USER_INVALID_EMAIL',
+  DUPLICATE_EMAIL = 'USER_DUPLICATE_EMAIL',
+}
+
+class UserServiceError extends Error {
+  constructor(readonly code: UserErrorCode) {
+    super(code);
+    this.name = 'UserServiceError';
+  }
+}
+
 export class UserService {
   private users: User[] = [];
 
+  private static toCanonicalEmail(raw: string): string {
+    return raw.trim().toLowerCase();
+  }
+
   createUser(name: string, email: string, role: User['role'] = 'user'): User {
-    if (!validateEmail(email)) {
-      throw new Error(`Invalid email: ${email}`);
+    const canonical = UserService.toCanonicalEmail(email);
+
+    if (!validateEmail(canonical)) {
+      throw new UserServiceError(UserErrorCode.INVALID_EMAIL);
     }
 
-    if (this.users.some(u => u.email === email)) {
-      throw new Error(`Email already registered: ${email}`);
+    if (this.users.some(u => u.email === canonical)) {
+      throw new UserServiceError(UserErrorCode.DUPLICATE_EMAIL);
     }
 
     const user: User = {
       id: crypto.randomUUID(),
       name: name.trim(),
-      email: email.trim().toLowerCase(),
+      email: canonical,
       role,
       createdAt: new Date(),
     };
@@ -37,7 +55,8 @@ export class UserService {
   }
 
   getUserByEmail(email: string): User | undefined {
-    return this.users.find(u => u.email === email.toLowerCase());
+    const canonical = UserService.toCanonicalEmail(email);
+    return this.users.find(u => u.email === canonical);
   }
 
   deleteUser(id: string): boolean {
