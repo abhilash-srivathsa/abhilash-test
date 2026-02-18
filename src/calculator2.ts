@@ -761,4 +761,21 @@ export class CommentManager {
     const safeSize = Math.max(1, Math.floor(pageSize));
     return this.comments.slice(safePage * safeSize, safePage * safeSize + safeSize);
   }
+
+  /**
+   * Merge comments from another manager, avoiding duplicates by ID
+   * @param other - Another CommentManager to merge from
+   * @returns Number of comments added
+   */
+  mergeFrom(other: CommentManager): number {
+    const otherComments = other.getAllComments();
+    let added = 0;
+    for (const comment of otherComments) {
+      if (!this.getCommentById(comment.id)) {
+        this.comments.push(comment);
+        added++;
+      }
+    }
+    return added;
+  }
 }
