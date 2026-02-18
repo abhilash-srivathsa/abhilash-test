@@ -769,10 +769,16 @@ export class CommentManager {
    */
   mergeFrom(other: CommentManager): number {
     const otherComments = other.getAllComments();
+    const existingOrgs = new Set(this.comments.map(c =>
+      `${c.organizationName}\0${c.author}\0${c.content}`
+    ));
     let added = 0;
     for (const comment of otherComments) {
-      if (!this.getCommentById(comment.id)) {
-        this.comments.push(comment);
+      const key = `${comment.organizationName}\0${comment.author}\0${comment.content}`;
+      if (!existingOrgs.has(key)) {
+        const cloned = structuredClone(comment);
+        this.comments.push({ ...cloned, id: this.nextId++ });
+        existingOrgs.add(key);
         added++;
       }
     }
