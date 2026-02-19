@@ -33,4 +33,13 @@ export class Calculator {
     }
     return n * this.factorial(n - 1);
   }
+
+  // BUG: No validation for negative numbers, causes infinite recursion
+  // BUG: Exponential time complexity O(2^n) - no memoization
+  fibonacci(n: number): number {
+    if (n <= 1) {
+      return n;
+    }
+    return this.fibonacci(n - 1) + this.fibonacci(n - 2);
+  }
 }
