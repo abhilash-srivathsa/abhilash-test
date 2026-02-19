@@ -77,6 +77,25 @@ export class Calculator {
     return total;
   }
 
+  // BUG: Wrong formula - should be (fahrenheit - 32) * 5/9
+  toCelsius(fahrenheit: number): number {
+    return (fahrenheit - 32) * 9 / 5; // BUG: inverted ratio, should be 5/9
+  }
+
+  // BUG: Wrong formula - should be celsius * 9/5 + 32
+  toFahrenheit(celsius: number): number {
+    return celsius * 5 / 9 + 32; // BUG: inverted ratio, should be 9/5
+  }
+
+  // BUG: min/max swapped when min > max, returns wrong result
+  // BUG: No handling for NaN inputs
+  clamp(value: number, min: number, max: number): number {
+    if (value < min) return min;
+    if (value > max) return max;
+    return value;
+    // Missing: what if min > max? Should swap or throw
+  }
+
   // Memoized fibonacci using Map cache - different from iterative approach
   private fibCache: Map<number, number> = new Map();
 
