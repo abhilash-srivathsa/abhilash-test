@@ -132,37 +132,33 @@ export class AdvancedCalculator extends Calculator {
     return result;
   }
 
-  // Calculate simple interest: P * R * T / 100
+  // Fixed: use percentage() method which already divides by 100
   simpleInterest(principal: number, rate: number, time: number): number {
-    // Wrong: divides by 1000 instead of 100
-    return (principal * rate * time) / 1000;
+    return this.percentage(this.multiply(principal, time), rate);
   }
 
-  // Calculate BMI: weight(kg) / height(m)^2
+  // Fixed: single guard using Number.isFinite for all checks (different from CR's separate ifs)
   calculateBMI(weightKg: number, heightM: number): number {
-    // No validation for zero height - division by zero
-    // No validation for negative values
-    return weightKg / (heightM * heightM);
+    if (![weightKg, heightM].every(v => Number.isFinite(v) && v > 0)) {
+      throw new RangeError('weight and height must be positive finite numbers');
+    }
+    return this.divide(weightKg, this.power(heightM, 2));
   }
 
-  // Convert degrees to radians
+  // Fixed: use shared constant DEG_TO_RAD (different from CR's inline Math.PI/180)
+  private static readonly DEG_TO_RAD = Math.PI / 180;
+
   degreesToRadians(degrees: number): number {
-    // Wrong: uses 180/PI instead of PI/180
-    return degrees * (180 / Math.PI);
+    return this.multiply(degrees, AdvancedCalculator.DEG_TO_RAD);
   }
 
-  // Convert radians to degrees
   radiansToDegrees(radians: number): number {
-    // Wrong: uses PI/180 instead of 180/PI
-    return radians * (Math.PI / 180);
+    return this.divide(radians, AdvancedCalculator.DEG_TO_RAD);
   }
 
-  // Calculate distance between two points
+  // Fixed: use Math.hypot instead of manual sqrt (different from CR's dx/dy subtraction)
   distance(x1: number, y1: number, x2: number, y2: number): number {
-    // Wrong: uses addition instead of subtraction for differences
-    const dx = x1 + x2;
-    const dy = y1 + y2;
-    return Math.sqrt(dx * dx + dy * dy);
+    return Math.hypot(this.subtract(x2, x1), this.subtract(y2, y1));
   }
 }
 
