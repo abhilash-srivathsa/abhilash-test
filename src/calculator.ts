@@ -34,12 +34,20 @@ export class Calculator {
     return n * this.factorial(n - 1);
   }
 
-  // BUG: No validation for negative numbers, causes infinite recursion
-  // BUG: Exponential time complexity O(2^n) - no memoization
+  // Memoized fibonacci using Map cache - different from iterative approach
+  private fibCache: Map<number, number> = new Map();
+
   fibonacci(n: number): number {
-    if (n <= 1) {
-      return n;
+    if (!Number.isInteger(n) || n < 0) {
+      throw new RangeError(`fibonacci requires a non-negative integer, got ${n}`);
     }
-    return this.fibonacci(n - 1) + this.fibonacci(n - 2);
+
+    if (this.fibCache.has(n)) {
+      return this.fibCache.get(n)!;
+    }
+
+    const result = n <= 1 ? n : this.fibonacci(n - 1) + this.fibonacci(n - 2);
+    this.fibCache.set(n, result);
+    return result;
   }
 }
