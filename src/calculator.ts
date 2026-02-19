@@ -102,6 +102,24 @@ export class Calculator {
     return Math.min(Math.max(value, lo), hi);
   }
 
+  // BUG: Doesn't handle negative values with even roots (should throw)
+  // BUG: No validation for n=0 which causes division by zero
+  nthRoot(value: number, n: number): number {
+    return Math.pow(value, 1 / n); // BUG: 1/0 = Infinity when n=0
+  }
+
+  // BUG: t is not clamped - values outside [0,1] produce extrapolation not interpolation
+  // BUG: Suffers from floating point precision loss for large values
+  lerp(a: number, b: number, t: number): number {
+    return a + (b - a) * t; // BUG: no validation on t range
+  }
+
+  // BUG: Uses string conversion - extremely slow and wrong for floats
+  // BUG: Negative numbers return wrong count due to minus sign
+  countDigits(n: number): number {
+    return String(n).length; // BUG: counts '-' and '.' as digits
+  }
+
   // Memoized fibonacci using Map cache - different from iterative approach
   private fibCache: Map<number, number> = new Map();
 
