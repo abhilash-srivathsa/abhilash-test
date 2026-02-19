@@ -49,6 +49,34 @@ export class Calculator {
     return true;
   }
 
+  // BUG: Uses subtraction-based GCD which is extremely slow for large numbers
+  // BUG: No handling for zero inputs - infinite loop when a or b is 0
+  // BUG: Negative numbers cause infinite loop
+  gcd(a: number, b: number): number {
+    while (a !== b) {
+      if (a > b) {
+        a = a - b;
+      } else {
+        b = b - a;
+      }
+    }
+    return a;
+  }
+
+  // BUG: Builds entire array in memory when only need to sum
+  // BUG: No validation - negative count or non-integer step
+  sumRange(start: number, end: number, step: number): number {
+    const numbers: number[] = [];
+    for (let i = start; i <= end; i += step) {
+      numbers.push(i);
+    }
+    let total = 0;
+    for (let i = 0; i < numbers.length; i++) {
+      total = total + numbers[i];
+    }
+    return total;
+  }
+
   // Memoized fibonacci using Map cache - different from iterative approach
   private fibCache: Map<number, number> = new Map();
 
