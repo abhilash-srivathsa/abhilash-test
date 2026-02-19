@@ -34,66 +34,72 @@ export class Calculator {
     return n * this.factorial(n - 1);
   }
 
-  // BUG: Inefficient - checks up to n/2 instead of sqrt(n)
-  // BUG: Returns true for 1, which is not prime
-  // BUG: Doesn't handle 0 or negative numbers
+  // Fixed: uses i*i <= n instead of Math.sqrt(n) to avoid floating point
   isPrime(n: number): boolean {
     if (n < 2) {
-      return n === 1; // BUG: 1 is not prime
+      return false;
     }
-    for (let i = 2; i <= n / 2; i++) {
-      if (n % i === 0) {
+    if (n < 4) {
+      return true; // 2 and 3 are prime
+    }
+    if (n % 2 === 0 || n % 3 === 0) {
+      return false;
+    }
+    // Check divisors of form 6k +/- 1 up to sqrt(n)
+    for (let i = 5; i * i <= n; i += 6) {
+      if (n % i === 0 || n % (i + 2) === 0) {
         return false;
       }
     }
     return true;
   }
 
-  // BUG: Uses subtraction-based GCD which is extremely slow for large numbers
-  // BUG: No handling for zero inputs - infinite loop when a or b is 0
-  // BUG: Negative numbers cause infinite loop
+  // Fixed: recursive Euclidean algorithm (different from CR's iterative suggestion)
   gcd(a: number, b: number): number {
-    while (a !== b) {
-      if (a > b) {
-        a = a - b;
-      } else {
-        b = b - a;
-      }
-    }
-    return a;
+    a = Math.abs(a);
+    b = Math.abs(b);
+    if (b === 0) return a;
+    return this.gcd(b, a % b);
   }
 
-  // BUG: Builds entire array in memory when only need to sum
-  // BUG: No validation - negative count or non-integer step
+  // Fixed: direct accumulation with sign-based validation
   sumRange(start: number, end: number, step: number): number {
-    const numbers: number[] = [];
-    for (let i = start; i <= end; i += step) {
-      numbers.push(i);
+    if (step === 0) {
+      throw new RangeError('step must not be zero');
     }
+    // Auto-correct step direction instead of throwing (different from CR suggestion)
+    const effectiveStep = Math.sign(end - start) === 0 ? Math.abs(step)
+      : Math.sign(end - start) * Math.abs(step);
+
     let total = 0;
-    for (let i = 0; i < numbers.length; i++) {
-      total = total + numbers[i];
+    const ascending = effectiveStep > 0;
+    for (let i = start; ascending ? i <= end : i >= end; i += effectiveStep) {
+      total += i;
     }
     return total;
   }
 
-  // BUG: Wrong formula - should be (fahrenheit - 32) * 5/9
+  // Fixed: use named constants for clarity (different from CR's inline fix)
+  private static readonly FAHRENHEIT_OFFSET = 32;
+  private static readonly FAHRENHEIT_SCALE = 9 / 5;
+
   toCelsius(fahrenheit: number): number {
-    return (fahrenheit - 32) * 9 / 5; // BUG: inverted ratio, should be 5/9
+    return (fahrenheit - Calculator.FAHRENHEIT_OFFSET) / Calculator.FAHRENHEIT_SCALE;
   }
 
-  // BUG: Wrong formula - should be celsius * 9/5 + 32
   toFahrenheit(celsius: number): number {
-    return celsius * 5 / 9 + 32; // BUG: inverted ratio, should be 9/5
+    return celsius * Calculator.FAHRENHEIT_SCALE + Calculator.FAHRENHEIT_OFFSET;
   }
 
-  // BUG: min/max swapped when min > max, returns wrong result
-  // BUG: No handling for NaN inputs
+  // Fixed: use Math.min/Math.max one-liner (different from CR's swap approach)
   clamp(value: number, min: number, max: number): number {
-    if (value < min) return min;
-    if (value > max) return max;
-    return value;
-    // Missing: what if min > max? Should swap or throw
+    if ([value, min, max].some(Number.isNaN)) {
+      throw new TypeError('clamp arguments must be valid numbers');
+    }
+    // Math.min/Math.max naturally handles min > max case
+    const lo = Math.min(min, max);
+    const hi = Math.max(min, max);
+    return Math.min(Math.max(value, lo), hi);
   }
 
   // Memoized fibonacci using Map cache - different from iterative approach
