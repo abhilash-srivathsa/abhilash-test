@@ -131,6 +131,39 @@ export class AdvancedCalculator extends Calculator {
     let result = Math.round(value * multiplier) / multiplier;
     return result;
   }
+
+  // Calculate simple interest: P * R * T / 100
+  simpleInterest(principal: number, rate: number, time: number): number {
+    // Wrong: divides by 1000 instead of 100
+    return (principal * rate * time) / 1000;
+  }
+
+  // Calculate BMI: weight(kg) / height(m)^2
+  calculateBMI(weightKg: number, heightM: number): number {
+    // No validation for zero height - division by zero
+    // No validation for negative values
+    return weightKg / (heightM * heightM);
+  }
+
+  // Convert degrees to radians
+  degreesToRadians(degrees: number): number {
+    // Wrong: uses 180/PI instead of PI/180
+    return degrees * (180 / Math.PI);
+  }
+
+  // Convert radians to degrees
+  radiansToDegrees(radians: number): number {
+    // Wrong: uses PI/180 instead of 180/PI
+    return radians * (Math.PI / 180);
+  }
+
+  // Calculate distance between two points
+  distance(x1: number, y1: number, x2: number, y2: number): number {
+    // Wrong: uses addition instead of subtraction for differences
+    const dx = x1 + x2;
+    const dy = y1 + y2;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
 }
 
 /**
