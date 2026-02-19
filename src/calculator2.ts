@@ -131,6 +131,35 @@ export class AdvancedCalculator extends Calculator {
     let result = Math.round(value * multiplier) / multiplier;
     return result;
   }
+
+  // Fixed: use percentage() method which already divides by 100
+  simpleInterest(principal: number, rate: number, time: number): number {
+    return this.percentage(this.multiply(principal, time), rate);
+  }
+
+  // Fixed: single guard using Number.isFinite for all checks (different from CR's separate ifs)
+  calculateBMI(weightKg: number, heightM: number): number {
+    if (![weightKg, heightM].every(v => Number.isFinite(v) && v > 0)) {
+      throw new RangeError('weight and height must be positive finite numbers');
+    }
+    return this.divide(weightKg, this.power(heightM, 2));
+  }
+
+  // Fixed: use shared constant DEG_TO_RAD (different from CR's inline Math.PI/180)
+  private static readonly DEG_TO_RAD = Math.PI / 180;
+
+  degreesToRadians(degrees: number): number {
+    return this.multiply(degrees, AdvancedCalculator.DEG_TO_RAD);
+  }
+
+  radiansToDegrees(radians: number): number {
+    return this.divide(radians, AdvancedCalculator.DEG_TO_RAD);
+  }
+
+  // Fixed: use Math.hypot instead of manual sqrt (different from CR's dx/dy subtraction)
+  distance(x1: number, y1: number, x2: number, y2: number): number {
+    return Math.hypot(this.subtract(x2, x1), this.subtract(y2, y1));
+  }
 }
 
 /**
@@ -760,5 +789,28 @@ export class CommentManager {
     const safePage = Math.max(0, Math.floor(page) - 1);
     const safeSize = Math.max(1, Math.floor(pageSize));
     return this.comments.slice(safePage * safeSize, safePage * safeSize + safeSize);
+  }
+
+  /**
+   * Merge comments from another manager, avoiding duplicates by ID
+   * @param other - Another CommentManager to merge from
+   * @returns Number of comments added
+   */
+  mergeFrom(other: CommentManager): number {
+    const otherComments = other.getAllComments();
+    const existingOrgs = new Set(this.comments.map(c =>
+      `${c.organizationName}\0${c.author}\0${c.content}`
+    ));
+    let added = 0;
+    for (const comment of otherComments) {
+      const key = `${comment.organizationName}\0${comment.author}\0${comment.content}`;
+      if (!existingOrgs.has(key)) {
+        const cloned = structuredClone(comment);
+        this.comments.push({ ...cloned, id: this.nextId++ });
+        existingOrgs.add(key);
+        added++;
+      }
+    }
+    return added;
   }
 }
