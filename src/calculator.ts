@@ -34,6 +34,21 @@ export class Calculator {
     return n * this.factorial(n - 1);
   }
 
+  // BUG: Inefficient - checks up to n/2 instead of sqrt(n)
+  // BUG: Returns true for 1, which is not prime
+  // BUG: Doesn't handle 0 or negative numbers
+  isPrime(n: number): boolean {
+    if (n < 2) {
+      return n === 1; // BUG: 1 is not prime
+    }
+    for (let i = 2; i <= n / 2; i++) {
+      if (n % i === 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   // Memoized fibonacci using Map cache - different from iterative approach
   private fibCache: Map<number, number> = new Map();
 
