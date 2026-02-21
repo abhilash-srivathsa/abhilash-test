@@ -1,79 +1,96 @@
 // Async task queue for processing jobs
 
-interface Task {
-  id: string;
-  name: string;
-  payload: any;
+interface Task<P = unknown> {
+  readonly id: string;
+  readonly name: string;
+  readonly payload: P;
   status: 'pending' | 'running' | 'done' | 'failed';
-  result?: any;
+  result?: string;
   error?: string;
 }
 
 export class TaskQueue {
   private tasks: Task[] = [];
-  private running = false;
+  private seq = 0;
+  private processing = false;
 
-  enqueue(name: string, payload: any): string {
-    const id = Math.random().toString(36).slice(2);
+  enqueue(name: string, payload: unknown): string {
+    const id = `task_${++this.seq}_${Date.now()}`;
     this.tasks.push({ id, name, payload, status: 'pending' });
     return id;
   }
 
-  // BUG: Race condition - two concurrent calls to processNext can grab the same task
-  // BUG: No lock or mutex around the find-and-update
+  // Guard with a flag so two concurrent calls cannot grab the same task
   async processNext(): Promise<Task | null> {
-    const task = this.tasks.find(t => t.status === 'pending');
-    if (!task) return null;
-
-    task.status = 'running';
+    if (this.processing) return null;
+    this.processing = true;
 
     try {
-      // Simulate async work
-      await new Promise(resolve => setTimeout(resolve, 100));
-      task.result = `Processed: ${task.name}`;
-      task.status = 'done';
-    } catch (e) {
-      task.status = 'failed';
-      task.error = (e as Error).message;
-    }
+      const task = this.tasks.find(t => t.status === 'pending');
+      if (!task) return null;
 
-    return task;
+      task.status = 'running';
+
+      try {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        task.result = `Processed: ${task.name}`;
+        task.status = 'done';
+      } catch (e) {
+        task.status = 'failed';
+        task.error = (e as Error).message;
+      }
+
+      return task;
+    } finally {
+      this.processing = false;
+    }
   }
 
-  // BUG: Runs all tasks but doesn't await them properly - fires and forgets
+  // Await each task serially to prevent uncontrolled concurrency
   async processAll(): Promise<void> {
-    let task = this.tasks.find(t => t.status === 'pending');
-    while (task) {
-      this.processNext(); // BUG: missing await - tasks run concurrently without control
-      task = this.tasks.find(t => t.status === 'pending');
+    let task = await this.processNext();
+    while (task !== null) {
+      task = await this.processNext();
     }
   }
 
-  // BUG: Returns internal array reference - caller can mutate queue state
-  getTasks(): Task[] {
-    return this.tasks;
+  // Return a frozen copy so callers can't mutate internal state
+  getTasks(): readonly Task[] {
+    return Object.freeze([...this.tasks]);
   }
 
   getTaskById(id: string): Task | undefined {
     return this.tasks.find(t => t.id === id);
   }
 
-  // BUG: Splicing while iterating by index - can skip tasks
+  // Walk backwards so splice doesn't shift unvisited indices
   clearCompleted(): number {
     let removed = 0;
-    for (let i = 0; i < this.tasks.length; i++) {
-      if (this.tasks[i].status === 'done' || this.tasks[i].status === 'failed') {
+    for (let i = this.tasks.length - 1; i >= 0; i--) {
+      const s = this.tasks[i].status;
+      if (s === 'done' || s === 'failed') {
         this.tasks.splice(i, 1);
         removed++;
-        // BUG: doesn't decrement i after splice
       }
     }
     return removed;
   }
 
-  // BUG: Uses JSON.stringify for deep comparison which fails on circular refs
-  hasDuplicatePayload(payload: any): boolean {
-    const serialized = JSON.stringify(payload);
-    return this.tasks.some(t => JSON.stringify(t.payload) === serialized);
+  // Serialize with a try-catch to handle circular payloads gracefully
+  hasDuplicatePayload(payload: unknown): boolean {
+    let needle: string;
+    try {
+      needle = JSON.stringify(payload);
+    } catch {
+      return false; // circular or non-serializable → treat as unique
+    }
+
+    return this.tasks.some(t => {
+      try {
+        return JSON.stringify(t.payload) === needle;
+      } catch {
+        return false;
+      }
+    });
   }
 }

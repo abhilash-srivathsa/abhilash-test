@@ -1,73 +1,88 @@
 // Event bus for pub/sub messaging
 
-type EventHandler = (...args: any[]) => void;
+type EventHandler = (...args: unknown[]) => void;
+
+const MAX_LISTENERS_PER_EVENT = 100;
 
 export class EventBus {
-  // BUG: Using Record instead of Map - inherited Object.prototype methods
-  // can collide with event names like "constructor", "toString"
-  private listeners: Record<string, EventHandler[]> = {};
+  // Prototype-free object eliminates collisions with toString, constructor, etc.
+  private channels: { [event: string]: EventHandler[] } = Object.create(null);
 
-  // BUG: No limit on number of listeners per event - potential memory leak
-  // BUG: Same handler can be registered multiple times
+  private ensureChannel(event: string): EventHandler[] {
+    if (!(event in this.channels)) {
+      this.channels[event] = [];
+    }
+    return this.channels[event];
+  }
+
   on(event: string, handler: EventHandler): void {
-    if (!this.listeners[event]) {
-      this.listeners[event] = [];
+    const ch = this.ensureChannel(event);
+    if (ch.length >= MAX_LISTENERS_PER_EVENT) {
+      throw new Error(`Listener limit (${MAX_LISTENERS_PER_EVENT}) reached for "${event}"`);
     }
-    this.listeners[event].push(handler);
+    if (ch.includes(handler)) return; // prevent duplicate registration
+    ch.push(handler);
   }
 
-  // BUG: Registers handler that fires once, but uses splice during iteration
-  // If multiple once-handlers fire in sequence, indices shift and some get skipped
   once(event: string, handler: EventHandler): void {
-    const wrapper: EventHandler = (...args) => {
-      handler(...args);
-      this.off(event, wrapper);
-    };
-    this.on(event, wrapper);
+    const self = this;
+    function oneShot(this: unknown, ...args: unknown[]): void {
+      self.off(event, oneShot);
+      handler.apply(this, args);
+    }
+    // Stash original so off() can match by original reference too
+    (oneShot as any).__wrapped = handler;
+    this.on(event, oneShot);
   }
 
-  // BUG: Uses indexOf which checks reference equality
-  // Arrow functions or bound functions won't match
   off(event: string, handler: EventHandler): void {
-    const handlers = this.listeners[event];
-    if (!handlers) return;
-
-    const index = handlers.indexOf(handler);
-    if (index !== -1) {
-      handlers.splice(index, 1);
-    }
+    if (!(event in this.channels)) return;
+    const ch = this.channels[event];
+    const idx = ch.findIndex(
+      (h) => h === handler || (h as any).__wrapped === handler,
+    );
+    if (idx >= 0) ch.splice(idx, 1);
   }
 
-  // BUG: If a handler throws, subsequent handlers for the same event are skipped
-  // No error isolation between handlers
-  emit(event: string, ...args: any[]): void {
-    const handlers = this.listeners[event];
-    if (!handlers) return;
+  // Run every handler; collect errors and throw aggregate after all have run
+  emit(event: string, ...args: unknown[]): void {
+    if (!(event in this.channels)) return;
 
-    for (const handler of handlers) {
-      handler(...args);
-    }
-  }
+    // Snapshot so mutations during emit don't affect iteration
+    const snapshot = Array.from(this.channels[event]);
+    const errors: Error[] = [];
 
-  // BUG: Only counts direct listeners, not once-wrapped handlers
-  listenerCount(event: string): number {
-    return this.listeners[event]?.length ?? 0;
-  }
-
-  // BUG: Returns internal array reference - caller can push/pop handlers
-  getListeners(event: string): EventHandler[] {
-    return this.listeners[event] ?? [];
-  }
-
-  // BUG: Doesn't clean up references - just empties arrays
-  // The event keys still exist in the object
-  removeAllListeners(event?: string): void {
-    if (event) {
-      this.listeners[event] = [];
-    } else {
-      for (const key of Object.keys(this.listeners)) {
-        this.listeners[key] = [];
+    for (const handler of snapshot) {
+      try {
+        handler(...args);
+      } catch (err) {
+        errors.push(err instanceof Error ? err : new Error(String(err)));
       }
+    }
+
+    if (errors.length === 1) throw errors[0];
+    if (errors.length > 1) {
+      throw new AggregateError(errors, `${errors.length} handler(s) failed for "${event}"`);
+    }
+  }
+
+  listenerCount(event: string): number {
+    if (!(event in this.channels)) return 0;
+    return this.channels[event].length;
+  }
+
+  // Return a shallow copy so the caller cannot mutate internal state
+  getListeners(event: string): EventHandler[] {
+    if (!(event in this.channels)) return [];
+    return Array.from(this.channels[event]);
+  }
+
+  removeAllListeners(event?: string): void {
+    if (event !== undefined) {
+      delete this.channels[event];
+    } else {
+      // Wipe entire object by recreating prototype-free store
+      this.channels = Object.create(null);
     }
   }
 }

@@ -1,86 +1,101 @@
 // Data transformation pipeline
 
+type TransformFn = (input: unknown) => unknown;
+
+const BUILTIN_TRANSFORMS: Record<string, TransformFn> = {
+  uppercase: (v) => String(v).toUpperCase(),
+  lowercase: (v) => String(v).toLowerCase(),
+  trim: (v) => String(v).trim(),
+  number: (v) => {
+    const n = Number(v);
+    if (Number.isNaN(n)) throw new TypeError(`Cannot convert "${v}" to number`);
+    return n;
+  },
+  boolean: (v) => v === 'true' || v === '1' || v === true,
+  json: (v) => JSON.parse(String(v)),
+  reverse: (v) => String(v).split('').reverse().join(''),
+};
+
 export class DataTransformer {
-  // BUG: Uses 'any' everywhere - no type safety
-  // BUG: Silently swallows transformation errors by returning original value
-  transform(data: any, transformations: string[]): any {
+  private registry: Record<string, TransformFn>;
+
+  constructor() {
+    this.registry = Object.create(null) as Record<string, TransformFn>;
+    for (const [name, fn] of Object.entries(BUILTIN_TRANSFORMS)) {
+      this.registry[name] = fn;
+    }
+  }
+
+  transform(data: unknown, transformations: string[]): unknown {
     let result = data;
     for (const t of transformations) {
-      try {
-        switch (t) {
-          case 'uppercase':
-            result = String(result).toUpperCase();
-            break;
-          case 'lowercase':
-            result = String(result).toLowerCase();
-            break;
-          case 'trim':
-            result = String(result).trim();
-            break;
-          case 'number':
-            result = Number(result); // BUG: NaN is silently propagated
-            break;
-          case 'boolean':
-            result = Boolean(result); // BUG: "false" string becomes true
-            break;
-          case 'json':
-            result = JSON.parse(result); // BUG: can throw, caught silently
-            break;
-          case 'reverse':
-            result = String(result).split('').reverse().join('');
-            break;
-          default:
-            // BUG: Unknown transformation silently ignored
-            break;
-        }
-      } catch {
-        // BUG: Error swallowed - caller has no idea transformation failed
-        continue;
+      const fn = this.registry[t];
+      if (!fn) {
+        throw new Error(`Unknown transformation: "${t}"`);
       }
+      result = fn(result);
     }
     return result;
   }
 
-  // BUG: Builds object with string keys from user input without prototype pollution check
-  // Setting __proto__, constructor, or prototype keys can pollute Object.prototype
-  buildObject(entries: [string, any][]): Record<string, any> {
-    const obj: Record<string, any> = {};
+  // Use Object.create(null) so there's no prototype chain at all
+  buildObject(entries: [string, unknown][]): Record<string, unknown> {
+    const obj: Record<string, unknown> = Object.create(null);
     for (const [key, value] of entries) {
-      obj[key] = value; // BUG: no check for __proto__ or constructor
+      obj[key] = value;
     }
     return obj;
   }
 
-  // BUG: Flattens nested objects but uses recursive string concatenation for keys
-  // No depth limit - can stack overflow on circular references
-  flatten(obj: Record<string, any>, prefix: string = ''): Record<string, any> {
-    const result: Record<string, any> = {};
-    for (const [key, value] of Object.entries(obj)) {
-      const newKey = prefix ? `${prefix}.${key}` : key;
-      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
-        Object.assign(result, this.flatten(value, newKey)); // BUG: circular ref = infinite recursion
-      } else {
-        result[newKey] = value;
+  // Iterative flatten using an explicit stack with a hard depth ceiling
+  flatten(obj: Record<string, unknown>, prefix: string = '', maxDepth: number = 20): Record<string, unknown> {
+    const result: Record<string, unknown> = Object.create(null);
+    const stack: Array<{ current: Record<string, unknown>; prefix: string; depth: number }> = [
+      { current: obj, prefix, depth: 0 },
+    ];
+
+    while (stack.length > 0) {
+      const frame = stack.pop()!;
+      for (const [key, value] of Object.entries(frame.current)) {
+        const fullKey = frame.prefix ? `${frame.prefix}.${key}` : key;
+        if (
+          typeof value === 'object' &&
+          value !== null &&
+          !Array.isArray(value) &&
+          frame.depth < maxDepth
+        ) {
+          stack.push({ current: value as Record<string, unknown>, prefix: fullKey, depth: frame.depth + 1 });
+        } else {
+          result[fullKey] = value;
+        }
       }
     }
     return result;
   }
 
-  // BUG: Merges without considering array handling, Date objects, etc.
-  // Second object always wins - no deep merge strategy
-  deepMerge(target: any, source: any): any {
-    if (typeof target !== 'object' || typeof source !== 'object') {
+  deepMerge(target: unknown, source: unknown): unknown {
+    if (
+      target === null || source === null ||
+      typeof target !== 'object' || typeof source !== 'object' ||
+      Array.isArray(target) || Array.isArray(source)
+    ) {
       return source;
     }
 
-    const result = { ...target };
-    for (const key of Object.keys(source)) {
-      if (key in result && typeof result[key] === 'object' && typeof source[key] === 'object') {
-        result[key] = this.deepMerge(result[key], source[key]);
+    const merged: Record<string, unknown> = Object.create(null);
+    const tObj = target as Record<string, unknown>;
+    const sObj = source as Record<string, unknown>;
+
+    for (const key of Object.keys(tObj)) {
+      merged[key] = tObj[key];
+    }
+    for (const key of Object.keys(sObj)) {
+      if (key in merged && typeof merged[key] === 'object' && typeof sObj[key] === 'object') {
+        merged[key] = this.deepMerge(merged[key], sObj[key]);
       } else {
-        result[key] = source[key];
+        merged[key] = sObj[key];
       }
     }
-    return result;
+    return merged;
   }
 }
