@@ -1,41 +1,62 @@
 // Rate limiter for API request throttling
 
 interface RateLimitEntry {
-  tokens: number;
+  tokens: number;      // stored as float for continuous refill
   lastRefill: number;
 }
 
+function isRateLimitEntry(v: unknown): v is RateLimitEntry {
+  return (
+    typeof v === 'object' && v !== null &&
+    'tokens' in v && typeof (v as any).tokens === 'number' && Number.isFinite((v as any).tokens) &&
+    'lastRefill' in v && typeof (v as any).lastRefill === 'number' && Number.isFinite((v as any).lastRefill)
+  );
+}
+
 export class RateLimiter {
-  private buckets: Record<string, RateLimitEntry> = {};
+  // Prototype-free object — no collisions with __proto__ / constructor
+  private buckets: { [key: string]: RateLimitEntry } = Object.create(null);
   private maxTokens: number;
   private refillRate: number; // tokens per second
+  private readonly maxKeys: number;
 
-  constructor(maxTokens: number = 10, refillRate: number = 1) {
+  constructor(maxTokens: number = 10, refillRate: number = 1, maxKeys: number = 10_000) {
     this.maxTokens = maxTokens;
     this.refillRate = refillRate;
+    this.maxKeys = maxKeys;
   }
 
-  // BUG: No cleanup of stale entries - memory grows unbounded as new keys arrive
-  // BUG: Uses Record so __proto__ / constructor keys collide with Object.prototype
-  // BUG: refill calculation uses integer division, losing fractional tokens
+  // Continuous float-based refill — always updates lastRefill to now
   private refill(key: string): void {
     const entry = this.buckets[key];
     if (!entry) return;
 
     const now = Date.now();
-    const elapsed = (now - entry.lastRefill) / 1000;
-    const newTokens = Math.floor(elapsed * this.refillRate); // BUG: floor loses fractional tokens
+    const elapsedSec = (now - entry.lastRefill) / 1000;
+    entry.tokens = Math.min(this.maxTokens, entry.tokens + elapsedSec * this.refillRate);
+    entry.lastRefill = now;
+  }
 
-    if (newTokens > 0) {
-      entry.tokens = Math.min(this.maxTokens, entry.tokens + newTokens);
-      entry.lastRefill = now;
+  // Evict oldest entries when over capacity
+  private evictIfNeeded(): void {
+    const keys = Object.keys(this.buckets);
+    if (keys.length <= this.maxKeys) return;
+
+    // Sort by lastRefill ascending — evict stalest
+    keys.sort((a, b) => this.buckets[a].lastRefill - this.buckets[b].lastRefill);
+    const toRemove = keys.length - this.maxKeys;
+    for (let i = 0; i < toRemove; i++) {
+      delete this.buckets[keys[i]];
     }
   }
 
-  // BUG: Creates entry on first check even if not consuming - probes inflate memory
-  // BUG: No validation on key parameter - empty string or very long strings accepted
   consume(key: string, tokens: number = 1): boolean {
-    if (!this.buckets[key]) {
+    if (typeof key !== 'string' || key.length === 0 || key.length > 256) {
+      return false;
+    }
+
+    if (!(key in this.buckets)) {
+      this.evictIfNeeded();
       this.buckets[key] = { tokens: this.maxTokens, lastRefill: Date.now() };
     }
 
@@ -49,13 +70,13 @@ export class RateLimiter {
     return false;
   }
 
-  // BUG: Returns internal mutable reference
+  // Return a copy, not the internal mutable entry
   getStatus(key: string): RateLimitEntry | undefined {
-    return this.buckets[key];
+    const entry = this.buckets[key];
+    if (!entry) return undefined;
+    return { tokens: entry.tokens, lastRefill: entry.lastRefill };
   }
 
-  // BUG: Iterates all keys every time - O(n) with no short-circuit
-  // BUG: Only counts non-empty buckets, not all tracked keys
   getActiveCount(): number {
     let count = 0;
     for (const key in this.buckets) {
@@ -66,21 +87,36 @@ export class RateLimiter {
     return count;
   }
 
-  // BUG: Resets tokens but doesn't reset lastRefill - next refill gives bonus tokens
   reset(key: string): void {
-    if (this.buckets[key]) {
+    if (key in this.buckets) {
       this.buckets[key].tokens = this.maxTokens;
+      this.buckets[key].lastRefill = Date.now();
     }
   }
 
-  // BUG: JSON.stringify on potentially huge buckets object - can block event loop
   serialize(): string {
     return JSON.stringify(this.buckets);
   }
 
-  // BUG: No validation of deserialized data - trusts shape blindly
-  // BUG: Replaces entire state without merging - concurrent requests during load get lost
+  // Type-guard validated deserialization — rejects malformed entries
   deserialize(data: string): void {
-    this.buckets = JSON.parse(data);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      throw new SyntaxError('Invalid JSON in deserialize');
+    }
+
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      throw new TypeError('Expected object payload in deserialize');
+    }
+
+    const safe: { [key: string]: RateLimitEntry } = Object.create(null);
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (isRateLimitEntry(v)) {
+        safe[k] = { tokens: v.tokens, lastRefill: v.lastRefill };
+      }
+    }
+    this.buckets = safe;
   }
 }

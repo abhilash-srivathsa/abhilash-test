@@ -2,96 +2,121 @@
 
 type Listener<T> = (newValue: T, oldValue: T) => void;
 type Selector<T, R> = (state: T) => R;
+type Unsubscribe = () => void;
 
 export class ObservableState<T> {
   private state: T;
-  private listeners: Listener<T>[] = [];
-  private computing = false;
+  private subs = new Set<Listener<T>>();
+  private pendingNotify = false;
+  private pendingOld: T | undefined;
 
   constructor(initialState: T) {
     this.state = initialState;
   }
 
   getState(): T {
-    return this.state; // BUG: Returns mutable reference - external code can mutate state directly
+    // Return a frozen shallow copy for objects; primitives are already immutable
+    if (typeof this.state === 'object' && this.state !== null) {
+      return Object.freeze({ ...this.state as any }) as T;
+    }
+    return this.state;
   }
 
-  // BUG: No batching - each setState triggers all listeners synchronously
-  // BUG: No shallow equality check - setting same value triggers unnecessary notifications
-  // BUG: If a listener calls setState, causes re-entrant infinite loop
+  // Deferred notification via microtask — batches rapid setState calls
+  // and avoids re-entrancy since listeners fire outside the call stack
   setState(newState: T): void {
-    const oldState = this.state;
+    const old = this.pendingNotify ? this.pendingOld! : this.state;
     this.state = newState;
 
-    // BUG: Iterating over original array - if listener unsubscribes during iteration, indices shift
-    for (const listener of this.listeners) {
-      listener(newState, oldState);
+    if (!this.pendingNotify) {
+      this.pendingOld = old;
+      this.pendingNotify = true;
+      queueMicrotask(() => this.flush());
     }
   }
 
-  // BUG: No duplicate listener check - same function can be added multiple times
-  // BUG: No limit on listener count - memory leak if subscribe called without unsubscribe
-  subscribe(listener: Listener<T>): () => void {
-    this.listeners.push(listener);
+  private flush(): void {
+    if (!this.pendingNotify) return;
+    const oldSnap = this.pendingOld as T;
+    const newSnap = this.state;
+    this.pendingNotify = false;
+    this.pendingOld = undefined;
 
-    // Return unsubscribe function
-    // BUG: Closure captures listener reference - if same fn passed twice, first unsubscribe removes wrong one
+    // Set iteration is safe — deleting during iteration skips deleted entries,
+    // adding during iteration includes new entries, but that's acceptable
+    for (const listener of this.subs) {
+      listener(newSnap, oldSnap);
+    }
+  }
+
+  subscribe(listener: Listener<T>): Unsubscribe {
+    if (this.subs.has(listener)) {
+      return () => this.subs.delete(listener);
+    }
+    this.subs.add(listener);
+
     return () => {
-      const index = this.listeners.indexOf(listener);
-      if (index !== -1) {
-        this.listeners.splice(index, 1);
-      }
+      this.subs.delete(listener);
     };
   }
 
-  // BUG: Selector comparison uses === which fails for objects/arrays
-  // BUG: Computed value is not cached - selector runs on every state change
-  // BUG: No cleanup of internal subscription when derived observable is no longer needed
+  // Derived state with automatic cleanup via WeakRef
   select<R>(selector: Selector<T, R>): ObservableState<R> {
     const derived = new ObservableState<R>(selector(this.state));
+    const ref = new WeakRef(derived);
 
-    this.subscribe((newState) => {
-      const newDerived = selector(newState);
-      // BUG: === comparison fails for object/array selectors - always triggers
-      if (newDerived !== derived.getState()) {
-        derived.setState(newDerived);
+    const unsub = this.subscribe((next) => {
+      const target = ref.deref();
+      if (!target) {
+        unsub(); // Parent GC'd the derived — stop listening
+        return;
       }
+      const picked = selector(next);
+      // Use JSON serialization for structural equality on non-primitives
+      const changed = typeof picked === 'object'
+        ? JSON.stringify(picked) !== JSON.stringify(target.state)
+        : picked !== target.state;
+
+      if (changed) target.setState(picked);
     });
 
     return derived;
   }
 
-  // BUG: Merging assumes T is an object - crashes if T is a primitive
-  // BUG: Shallow merge only - nested objects are replaced, not merged
-  // BUG: No type safety - partial could contain keys not in T
   merge(partial: Partial<T>): void {
-    this.setState({ ...this.state as any, ...partial });
+    if (typeof this.state !== 'object' || this.state === null) {
+      throw new TypeError('merge() requires state to be an object');
+    }
+    this.setState({ ...this.state, ...partial });
   }
 
-  // BUG: History grows unbounded - no max history size
-  // BUG: History stores references, not clones - mutations affect history
-  private history: T[] = [];
+  // Bounded history with cloned snapshots
+  private snapshots: string[] = [];
+  private readonly maxSnapshots = 50;
 
   snapshot(): void {
-    this.history.push(this.state); // BUG: pushes reference not clone
-  }
-
-  // BUG: No bounds checking on history access
-  // BUG: Restoring triggers listeners but doesn't snapshot current state first
-  restore(index: number): void {
-    if (this.history[index] !== undefined) {
-      this.setState(this.history[index]);
+    if (this.snapshots.length >= this.maxSnapshots) {
+      this.snapshots.shift();
     }
+    this.snapshots.push(JSON.stringify(this.state));
   }
 
-  // BUG: Stringifies entire state including functions, symbols etc - data loss
+  restore(index: number): void {
+    if (index < 0 || index >= this.snapshots.length) {
+      throw new RangeError(`Snapshot index ${index} out of bounds (0..${this.snapshots.length - 1})`);
+    }
+    this.setState(JSON.parse(this.snapshots[index]) as T);
+  }
+
   toJSON(): string {
     return JSON.stringify(this.state);
   }
 
-  // BUG: No validation of parsed data against expected type T
-  // BUG: Triggers listeners for potentially invalid state
   fromJSON(json: string): void {
-    this.setState(JSON.parse(json));
+    const parsed = JSON.parse(json);
+    if (typeof this.state === 'object' && (typeof parsed !== 'object' || parsed === null)) {
+      throw new TypeError('Parsed JSON type does not match current state type');
+    }
+    this.setState(parsed as T);
   }
 }

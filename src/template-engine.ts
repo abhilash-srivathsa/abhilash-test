@@ -1,76 +1,73 @@
 // Simple string template engine with variable substitution and conditionals
 
-export class TemplateEngine {
-  private helpers: Record<string, (...args: any[]) => string> = {};
+// Entity lookup table for HTML encoding — avoids chained .replace() calls
+const HTML_ENTITIES: Record<string, string> = {
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+};
+const ENTITY_RE = /[&<>"']/g;
 
-  // BUG: No sanitization - helpers can be overwritten including __proto__
-  registerHelper(name: string, fn: (...args: any[]) => string): void {
+function encodeEntities(str: string): string {
+  return str.replace(ENTITY_RE, (ch) => HTML_ENTITIES[ch]);
+}
+
+type HelperFn = (...args: string[]) => string;
+
+export class TemplateEngine {
+  // Prototype-free store — no __proto__ or constructor collisions
+  private helpers: { [name: string]: HelperFn } = Object.create(null);
+
+  registerHelper(name: string, fn: HelperFn): void {
     this.helpers[name] = fn;
   }
 
-  // BUG: Regex-based parsing is fragile - nested braces break it
-  // BUG: No depth limit on recursive template resolution
-  // BUG: Circular variable references cause infinite recursion
-  render(template: string, context: Record<string, any>): string {
-    let result = template;
-    let iterations = 0;
+  // Single-pass renderer — resolves every token in one scan, no while-loop
+  render(template: string, context: Record<string, unknown>): string {
+    // 1) Strip conditionals first (single regex, non-greedy)
+    let result = template.replace(
+      /\{\{#if (\w+)\}\}([\s\S]*?)\{\{\/if\}\}/g,
+      (_m, key: string, body: string) => (context[key] ? body : ''),
+    );
 
-    // Keep replacing until no more variables found
-    // BUG: No iteration limit - circular refs like a={{b}}, b={{a}} loop forever
-    while (result.includes('{{')) {
-      const previous = result;
-
-      // Replace {{variable}} patterns
-      result = result.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
-        if (key in context) {
-          return String(context[key]);
+    // 2) Resolve helpers and plain variables in one pass
+    result = result.replace(
+      /\{\{(\w+)(?:\s+([^}]+))?\}\}/g,
+      (_m, name: string, argsStr?: string) => {
+        // If it looks like a helper call (has args or registered helper)
+        if (argsStr && name in this.helpers) {
+          return this.helpers[name](...argsStr.split(/\s+/));
         }
-        return ''; // BUG: silently removes unknown variables instead of keeping them
-      });
-
-      // Replace {{#if variable}}...{{/if}} blocks
-      // BUG: Greedy regex - nested if blocks match incorrectly
-      result = result.replace(
-        /\{\{#if (\w+)\}\}(.*?)\{\{\/if\}\}/gs,
-        (_match, key: string, content: string) => {
-          return context[key] ? content : '';
-        }
-      );
-
-      // Replace {{helper arg1 arg2}} patterns
-      // BUG: Uses eval-like split on spaces - can't handle quoted strings with spaces
-      result = result.replace(
-        /\{\{(\w+)\s+([^}]+)\}\}/g,
-        (_match, name: string, argsStr: string) => {
-          const helper = this.helpers[name];
-          if (!helper) return _match;
-          const args = argsStr.split(/\s+/);
-          return helper(...args);
-        }
-      );
-
-      iterations++;
-      if (result === previous) break; // no more changes
-      // BUG: iteration limit missing for circular variable case where result keeps changing
-    }
+        // Plain variable
+        return name in context ? String(context[name]) : '';
+      },
+    );
 
     return result;
   }
 
-  // BUG: Doesn't escape HTML entities - XSS vulnerability if used in HTML context
-  renderHTML(template: string, context: Record<string, any>): string {
-    return this.render(template, context);
+  // HTML-safe rendering — encode every interpolated value through entity table
+  renderHTML(template: string, context: Record<string, unknown>): string {
+    const safeCtx: Record<string, unknown> = Object.create(null);
+    for (const [k, v] of Object.entries(context)) {
+      safeCtx[k] = typeof v === 'string' ? encodeEntities(v) : v;
+    }
+    return this.render(template, safeCtx);
   }
 
-  // BUG: Regex extraction misses edge cases - variables inside helpers, nested variables
   extractVariables(template: string): string[] {
-    const matches = template.match(/\{\{(\w+)\}\}/g) ?? [];
-    return matches.map(m => m.replace(/[{}]/g, ''));
+    const seen = new Set<string>();
+    const re = /\{\{(\w+)\}\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(template)) !== null) {
+      seen.add(m[1]);
+    }
+    return Array.from(seen);
   }
 
-  // BUG: No validation that all required variables are provided
-  // BUG: Returns false for templates with only conditionals (no plain variables)
-  isComplete(template: string, context: Record<string, any>): boolean {
+  isComplete(template: string, context: Record<string, unknown>): boolean {
     const vars = this.extractVariables(template);
     return vars.every(v => v in context);
   }

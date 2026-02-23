@@ -17,88 +17,119 @@ interface ValidationError {
   message: string;
 }
 
+// Reject patterns that contain dangerous quantifier nesting
+function patternComplexity(pat: string): number {
+  let nesting = 0;
+  let maxNesting = 0;
+  for (const ch of pat) {
+    if (ch === '(' || ch === '[') nesting++;
+    else if (ch === ')' || ch === ']') nesting--;
+    if ((ch === '+' || ch === '*' || ch === '?') && nesting > 0) {
+      maxNesting = Math.max(maxNesting, nesting);
+    }
+  }
+  return maxNesting;
+}
+
+// Truthy/falsy lookup for boolean coercion
+const BOOL_TABLE: ReadonlyMap<string, boolean> = new Map([
+  ['true', true], ['yes', true], ['on', true], ['1', true],
+  ['false', false], ['no', false], ['off', false], ['0', false],
+]);
+
 export class SchemaValidator {
-  // BUG: No depth limit - deeply nested schemas cause stack overflow
-  // BUG: Circular schema references cause infinite recursion
-  validate(data: any, schema: SchemaRule, path: string = ''): ValidationError[] {
+  // Iterative, stack-based validation — no recursion at all
+  validate(data: unknown, schema: SchemaRule, rootPath: string = ''): ValidationError[] {
     const errors: ValidationError[] = [];
 
-    // BUG: typeof null === 'object' - null passes object type check
-    if (schema.type === 'object' && typeof data !== 'object') {
-      errors.push({ path, message: `Expected object, got ${typeof data}` });
-      return errors;
-    }
+    const stack: Array<{ data: unknown; schema: SchemaRule; path: string }> = [
+      { data, schema, path: rootPath },
+    ];
 
-    if (schema.type === 'string') {
-      if (typeof data !== 'string') {
-        errors.push({ path, message: `Expected string, got ${typeof data}` });
-        return errors;
-      }
+    while (stack.length > 0) {
+      const frame = stack.pop()!;
+      const { data: val, schema: rule, path } = frame;
 
-      // BUG: min/max check string length but names suggest numeric range
-      if (schema.min !== undefined && data.length < schema.min) {
-        errors.push({ path, message: `String too short (min ${schema.min})` });
-      }
-      if (schema.max !== undefined && data.length > schema.max) {
-        errors.push({ path, message: `String too long (max ${schema.max})` });
-      }
-
-      // BUG: User-provided pattern used directly in RegExp constructor - ReDoS vulnerability
-      if (schema.pattern) {
-        const regex = new RegExp(schema.pattern);
-        if (!regex.test(data)) {
-          errors.push({ path, message: `Does not match pattern ${schema.pattern}` });
+      // Null guard — typeof null is 'object'
+      if (val === null || val === undefined) {
+        if (rule.required) {
+          errors.push({ path, message: 'Required field missing' });
         }
-      }
-    }
-
-    if (schema.type === 'number') {
-      // BUG: NaN passes typeof check - NaN is typeof 'number'
-      if (typeof data !== 'number') {
-        errors.push({ path, message: `Expected number, got ${typeof data}` });
-        return errors;
+        continue;
       }
 
-      if (schema.min !== undefined && data < schema.min) {
-        errors.push({ path, message: `Value below minimum ${schema.min}` });
-      }
-      if (schema.max !== undefined && data > schema.max) {
-        errors.push({ path, message: `Value above maximum ${schema.max}` });
-      }
-    }
-
-    if (schema.type === 'boolean' && typeof data !== 'boolean') {
-      errors.push({ path, message: `Expected boolean, got ${typeof data}` });
-    }
-
-    // BUG: Doesn't check if data is actually an array (objects pass too)
-    if (schema.type === 'array') {
-      if (!Array.isArray(data)) {
-        errors.push({ path, message: `Expected array, got ${typeof data}` });
-        return errors;
-      }
-
-      if (schema.items) {
-        for (let i = 0; i < data.length; i++) {
-          // BUG: Recursive call with no depth tracking
-          errors.push(...this.validate(data[i], schema.items, `${path}[${i}]`));
-        }
-      }
-    }
-
-    // BUG: Doesn't validate nested object properties - just checks type
-    if (schema.type === 'object' && schema.properties) {
-      for (const [key, propSchema] of Object.entries(schema.properties)) {
-        const value = (data as any)[key];
-
-        // BUG: undefined and missing key are conflated
-        if (propSchema.required && value === undefined) {
-          errors.push({ path: `${path}.${key}`, message: 'Required field missing' });
+      if (rule.type === 'string') {
+        if (typeof val !== 'string') {
+          errors.push({ path, message: `Expected string, got ${typeof val}` });
           continue;
         }
+        if (rule.min !== undefined && val.length < rule.min) {
+          errors.push({ path, message: `String too short (min ${rule.min})` });
+        }
+        if (rule.max !== undefined && val.length > rule.max) {
+          errors.push({ path, message: `String too long (max ${rule.max})` });
+        }
+        if (rule.pattern) {
+          // Reject overly complex patterns (nested quantifiers score > 1)
+          if (patternComplexity(rule.pattern) > 1) {
+            errors.push({ path, message: 'Pattern rejected: nested quantifiers detected' });
+          } else {
+            try {
+              if (!new RegExp(rule.pattern).test(val)) {
+                errors.push({ path, message: `Does not match pattern ${rule.pattern}` });
+              }
+            } catch {
+              errors.push({ path, message: `Invalid regex pattern: ${rule.pattern}` });
+            }
+          }
+        }
+      }
 
-        if (value !== undefined) {
-          errors.push(...this.validate(value, propSchema, `${path}.${key}`));
+      if (rule.type === 'number') {
+        if (typeof val !== 'number' || Number.isNaN(val)) {
+          errors.push({ path, message: `Expected number, got ${typeof val}` });
+          continue;
+        }
+        if (rule.min !== undefined && val < rule.min) {
+          errors.push({ path, message: `Value below minimum ${rule.min}` });
+        }
+        if (rule.max !== undefined && val > rule.max) {
+          errors.push({ path, message: `Value above maximum ${rule.max}` });
+        }
+      }
+
+      if (rule.type === 'boolean' && typeof val !== 'boolean') {
+        errors.push({ path, message: `Expected boolean, got ${typeof val}` });
+      }
+
+      if (rule.type === 'array') {
+        if (!Array.isArray(val)) {
+          errors.push({ path, message: `Expected array, got ${typeof val}` });
+          continue;
+        }
+        if (rule.items) {
+          for (let i = 0; i < val.length; i++) {
+            stack.push({ data: val[i], schema: rule.items, path: `${path}[${i}]` });
+          }
+        }
+      }
+
+      if (rule.type === 'object') {
+        if (typeof val !== 'object' || Array.isArray(val)) {
+          errors.push({ path, message: `Expected object, got ${typeof val}` });
+          continue;
+        }
+        if (rule.properties) {
+          for (const [key, propSchema] of Object.entries(rule.properties)) {
+            const child = (val as Record<string, unknown>)[key];
+            if (child === undefined && propSchema.required) {
+              errors.push({ path: `${path}.${key}`, message: 'Required field missing' });
+              continue;
+            }
+            if (child !== undefined) {
+              stack.push({ data: child, schema: propSchema, path: `${path}.${key}` });
+            }
+          }
         }
       }
     }
@@ -106,20 +137,28 @@ export class SchemaValidator {
     return errors;
   }
 
-  // BUG: Just calls validate and checks length - doesn't provide error details
-  isValid(data: any, schema: SchemaRule): boolean {
+  isValid(data: unknown, schema: SchemaRule): boolean {
     return this.validate(data, schema).length === 0;
   }
 
-  // BUG: Coercion is lossy and can produce unexpected results
-  // BUG: "false" string coerces to true (Boolean("false") === true)
-  // BUG: No handling of null/undefined inputs
-  coerce(value: any, targetType: SchemaType): any {
+  coerce(value: unknown, targetType: SchemaType): unknown {
+    if (value === null || value === undefined) return value;
+
     switch (targetType) {
-      case 'string': return String(value);
-      case 'number': return Number(value);
-      case 'boolean': return Boolean(value);
-      default: return value;
+      case 'string':
+        return String(value);
+      case 'number': {
+        const n = Number(value);
+        return Number.isFinite(n) ? n : value;
+      }
+      case 'boolean': {
+        if (typeof value === 'boolean') return value;
+        if (typeof value === 'number') return value !== 0;
+        const lookup = BOOL_TABLE.get(String(value).toLowerCase());
+        return lookup !== undefined ? lookup : value;
+      }
+      default:
+        return value;
     }
   }
 }

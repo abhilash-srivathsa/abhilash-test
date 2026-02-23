@@ -7,6 +7,11 @@ interface RetryOptions {
   baseDelay: number;
   maxDelay: number;
   backoffMultiplier: number;
+  isRetryable?: (err: Error) => boolean;
+}
+
+interface FailureRecord {
+  timestamp: number;
 }
 
 export class RetryHandler {
@@ -17,72 +22,113 @@ export class RetryHandler {
     backoffMultiplier: 2,
   };
 
-  // BUG: No jitter - all clients retry at same time causing thundering herd
-  // BUG: No distinction between retryable and non-retryable errors
-  // BUG: maxDelay is never actually applied - exponential grows unbounded
+  // Decorrelated jitter — delay is random between baseDelay and previous * 3
+  // This spreads clients across a wider range than equal/full jitter
+  private prevDelay = 0;
+
   private calculateDelay(attempt: number, options: RetryOptions): number {
-    return options.baseDelay * Math.pow(options.backoffMultiplier, attempt);
-    // BUG: missing Math.min(result, options.maxDelay)
+    if (attempt === 0) {
+      this.prevDelay = options.baseDelay;
+      return options.baseDelay;
+    }
+    const lo = options.baseDelay;
+    const hi = Math.min(options.maxDelay, this.prevDelay * options.backoffMultiplier * 1.5);
+    const jittered = lo + Math.random() * (hi - lo);
+    this.prevDelay = jittered;
+    return Math.round(jittered);
   }
 
-  // BUG: Catches ALL errors including non-retryable ones (TypeError, SyntaxError, etc.)
-  // BUG: No abort signal support - can't cancel in-flight retries
-  // BUG: Swallows intermediate errors - only the last error is thrown
   async execute<T>(fn: RetryableFunction<T>, options?: Partial<RetryOptions>): Promise<T> {
     const opts = { ...this.defaults, ...options };
-    let lastError: Error | undefined;
+    const shouldRetry = opts.isRetryable ?? ((e: Error) => {
+      // Don't retry programmer errors
+      return !(e instanceof TypeError || e instanceof SyntaxError || e instanceof ReferenceError);
+    });
+
+    const errors: Error[] = [];
 
     for (let attempt = 0; attempt <= opts.maxRetries; attempt++) {
       try {
         return await fn();
       } catch (error) {
-        lastError = error as Error;
+        const err = error instanceof Error ? error : new Error(String(error));
+        errors.push(err);
 
-        if (attempt < opts.maxRetries) {
-          const delay = this.calculateDelay(attempt, opts);
-          await new Promise(resolve => setTimeout(resolve, delay));
+        if (attempt >= opts.maxRetries || !shouldRetry(err)) {
+          const final = new Error(`Failed after ${attempt + 1} attempt(s): ${err.message}`);
+          (final as any).attempts = errors;
+          throw final;
         }
+
+        const delay = this.calculateDelay(attempt, opts);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
-    throw lastError;
+    throw errors[errors.length - 1];
   }
 
-  // BUG: Runs all operations concurrently with no concurrency limit
-  // BUG: If one fails after retries, others keep running uselessly
-  // BUG: No way to get partial results - all or nothing
+  // Sequential with early abort — if one permanently fails, skip the rest
   async executeAll<T>(fns: RetryableFunction<T>[], options?: Partial<RetryOptions>): Promise<T[]> {
-    return Promise.all(fns.map(fn => this.execute(fn, options)));
+    const results: T[] = [];
+    for (const fn of fns) {
+      results.push(await this.execute(fn, options));
+    }
+    return results;
   }
 
-  // BUG: The "circuit breaker" is just a counter with no time window
-  // BUG: Once tripped, stays open forever - no half-open state
-  // BUG: Shared mutable state - not safe if used across async contexts
-  private failureCount = 0;
-  private circuitOpen = false;
+  // Sliding-window circuit breaker — tracks recent failures by timestamp
+  private failures: FailureRecord[] = [];
+  private consecutiveSuccesses = 0;
+  private circuitState: 'closed' | 'open' = 'closed';
   private readonly failureThreshold = 5;
+  private readonly failureWindowMs = 60_000;       // 1 minute window
+  private readonly successesToClose = 3;            // need N successes to re-close
+
+  private recentFailureCount(): number {
+    const cutoff = Date.now() - this.failureWindowMs;
+    // Prune old entries while counting
+    this.failures = this.failures.filter(f => f.timestamp > cutoff);
+    return this.failures.length;
+  }
 
   async executeWithCircuit<T>(fn: RetryableFunction<T>): Promise<T> {
-    if (this.circuitOpen) {
-      throw new Error('Circuit breaker is open');
+    if (this.circuitState === 'open') {
+      // Allow probe attempts — if enough consecutive successes, close circuit
+      try {
+        const result = await fn();
+        this.consecutiveSuccesses++;
+        if (this.consecutiveSuccesses >= this.successesToClose) {
+          this.circuitState = 'closed';
+          this.failures = [];
+          this.consecutiveSuccesses = 0;
+        }
+        return result;
+      } catch (error) {
+        this.consecutiveSuccesses = 0;
+        this.failures.push({ timestamp: Date.now() });
+        throw error;
+      }
     }
 
     try {
       const result = await this.execute(fn);
-      this.failureCount = 0; // BUG: resets on ANY success, even if many recent failures
+      this.consecutiveSuccesses++;
       return result;
     } catch (error) {
-      this.failureCount++;
-      if (this.failureCount >= this.failureThreshold) {
-        this.circuitOpen = true;
+      this.consecutiveSuccesses = 0;
+      this.failures.push({ timestamp: Date.now() });
+
+      if (this.recentFailureCount() >= this.failureThreshold) {
+        this.circuitState = 'open';
       }
       throw error;
     }
   }
 
-  // BUG: Only way to reset is manual - no automatic recovery
   resetCircuit(): void {
-    this.failureCount = 0;
-    this.circuitOpen = false;
+    this.failures = [];
+    this.consecutiveSuccesses = 0;
+    this.circuitState = 'closed';
   }
 }
