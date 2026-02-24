@@ -11,170 +11,132 @@ interface Role {
   inherits?: string[];
 }
 
-// Simple glob-style matcher: supports trailing * only (e.g. "users.*" matches "users.list")
-function globMatch(pattern: string, value: string): boolean {
-  if (pattern === value) return true;
-  if (pattern.endsWith('*')) {
-    return value.startsWith(pattern.slice(0, -1));
-  }
-  return false;
-}
-
-function isStringArray(v: unknown): v is string[] {
-  return Array.isArray(v) && v.every(e => typeof e === 'string');
-}
-
-function isPermission(v: unknown): v is Permission {
-  return (
-    typeof v === 'object' && v !== null &&
-    typeof (v as any).resource === 'string' &&
-    typeof (v as any).action === 'string'
-  );
+// Encode a permission as a canonical string key
+function permKey(resource: string, action: string): string {
+  return `${resource}\0${action}`;
 }
 
 export class AccessControl {
-  private roles: { [k: string]: Role } = Object.create(null);
-  private userRoles: { [k: string]: Set<string> } = Object.create(null);
+  private roleDefs = new Map<string, Role>();
+
+  // Pre-computed flat permission sets per role — rebuilt on any role mutation
+  // Inheritance is resolved eagerly so check() never traverses anything
+  private resolved = new Map<string, Set<string>>();
+  private userRoles = new Map<string, Set<string>>();
+
+  private rebuildResolved(): void {
+    this.resolved.clear();
+
+    // Topological flatten: for each role, collect own + all ancestor permissions
+    // into a single Set<string>. Because we iterate the full roleDefs map each
+    // time and cap the walk at roleDefs.size steps, cycles are impossible to
+    // cause a hang — the loop simply terminates.
+    for (const [name, role] of this.roleDefs) {
+      const keys = new Set<string>();
+      const pending = [role];
+      let steps = 0;
+
+      while (pending.length > 0 && steps < this.roleDefs.size + 1) {
+        steps++;
+        const cur = pending.pop()!;
+        for (const p of cur.permissions) keys.add(permKey(p.resource, p.action));
+        for (const parentName of cur.inherits ?? []) {
+          const parent = this.roleDefs.get(parentName);
+          if (parent) pending.push(parent);
+        }
+      }
+
+      this.resolved.set(name, keys);
+    }
+  }
 
   addRole(name: string, permissions: Permission[], inherits?: string[]): void {
-    if (!name || typeof name !== 'string') {
-      throw new Error('Role name must be a non-empty string');
-    }
-    this.roles[name] = { name, permissions, inherits };
+    this.roleDefs.set(name, { name, permissions, inherits });
+    this.rebuildResolved();
   }
 
   assignRole(userId: string, roleName: string): void {
-    if (!(roleName in this.roles)) {
-      throw new Error(`Role "${roleName}" does not exist`);
+    if (!this.roleDefs.has(roleName)) {
+      throw new Error(`Unknown role: ${roleName}`);
     }
-    if (!(userId in this.userRoles)) {
-      this.userRoles[userId] = new Set();
+    if (!this.userRoles.has(userId)) {
+      this.userRoles.set(userId, new Set());
     }
-    this.userRoles[userId].add(roleName); // Set prevents duplicates
+    this.userRoles.get(userId)!.add(roleName);
   }
 
-  // Iterative BFS — walks inheritance via a queue, never recurses
-  private collectPermissions(roleName: string): Permission[] {
-    const perms: Permission[] = [];
-    const seen = new Set<string>();
-    const queue: string[] = [roleName];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      if (seen.has(current)) continue; // cycle-safe
-      seen.add(current);
-
-      const role = this.roles[current];
-      if (!role) continue;
-
-      perms.push(...role.permissions);
-
-      if (role.inherits) {
-        for (const parent of role.inherits) {
-          if (!seen.has(parent)) queue.push(parent);
-        }
-      }
-    }
-
-    return perms;
-  }
-
-  // Glob-aware permission matching — wildcards only apply to their own dimension
+  // Single Set.has() lookup per role — no traversal, no recursion, no graph walk
   check(userId: string, resource: string, action: string): boolean {
-    const assigned = this.userRoles[userId];
-    if (!assigned) return false;
+    const roles = this.userRoles.get(userId);
+    if (!roles) return false;
 
-    for (const roleName of assigned) {
-      const permissions = this.collectPermissions(roleName);
+    const needle = permKey(resource, action);
 
-      for (const perm of permissions) {
-        if (globMatch(perm.resource, resource) && globMatch(perm.action, action)) {
-          return true;
-        }
-      }
+    for (const rn of roles) {
+      const perms = this.resolved.get(rn);
+      if (!perms) continue;
+
+      // Exact match
+      if (perms.has(needle)) return true;
+
+      // Wildcard: resource=* means all resources for that action, and vice-versa
+      // Both dimensions must match independently
+      if (perms.has(permKey('*', action))) return true;
+      if (perms.has(permKey(resource, '*'))) return true;
+      if (perms.has(permKey('*', '*'))) return true;
     }
 
     return false;
   }
 
   getUserRoles(userId: string): string[] {
-    const s = this.userRoles[userId];
-    return s ? Array.from(s) : [];
+    return Array.from(this.userRoles.get(userId) ?? []);
   }
 
-  // Also clean up user assignments pointing to this role
   removeRole(roleName: string): void {
-    delete this.roles[roleName];
-    for (const uid in this.userRoles) {
-      this.userRoles[uid].delete(roleName);
+    this.roleDefs.delete(roleName);
+    // Cascade: strip from every user
+    for (const roles of this.userRoles.values()) {
+      roles.delete(roleName);
     }
+    this.rebuildResolved();
   }
 
   revokeRole(userId: string, roleName: string): void {
-    const s = this.userRoles[userId];
-    if (s) s.delete(roleName);
+    this.userRoles.get(userId)?.delete(roleName);
   }
 
   exportPolicy(): string {
-    const out: Record<string, unknown> = Object.create(null);
-    out.roles = this.roles;
-    const ur: Record<string, string[]> = Object.create(null);
-    for (const uid in this.userRoles) {
-      ur[uid] = Array.from(this.userRoles[uid]);
-    }
-    out.userRoles = ur;
-    return JSON.stringify(out);
+    const roles: Record<string, Role> = {};
+    for (const [k, v] of this.roleDefs) roles[k] = v;
+    const ur: Record<string, string[]> = {};
+    for (const [k, v] of this.userRoles) ur[k] = Array.from(v);
+    return JSON.stringify({ roles, userRoles: ur });
   }
 
-  // Per-field validation before importing
   importPolicy(data: string): void {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(data);
-    } catch {
-      throw new SyntaxError('Invalid JSON in importPolicy');
-    }
+    const obj = JSON.parse(data);
 
-    if (typeof parsed !== 'object' || parsed === null) {
-      throw new TypeError('Policy must be an object');
-    }
+    // Build into temporaries — only swap on full success
+    const tmpRoles = new Map<string, Role>();
+    const tmpUR = new Map<string, Set<string>>();
 
-    const obj = parsed as Record<string, unknown>;
-
-    // Validate roles
-    if (typeof obj.roles !== 'object' || obj.roles === null) {
-      throw new TypeError('Policy.roles must be an object');
-    }
-    for (const [rn, rv] of Object.entries(obj.roles as Record<string, unknown>)) {
-      const r = rv as Record<string, unknown>;
-      if (typeof r.name !== 'string') throw new TypeError(`Invalid role name for key "${rn}"`);
-      if (!Array.isArray(r.permissions) || !r.permissions.every(isPermission)) {
-        throw new TypeError(`Invalid permissions for role "${rn}"`);
+    for (const [k, v] of Object.entries(obj.roles ?? {})) {
+      const r = v as Role;
+      if (typeof r.name !== 'string' || !Array.isArray(r.permissions)) {
+        throw new TypeError(`Malformed role: ${k}`);
       }
-      if (r.inherits !== undefined && !isStringArray(r.inherits)) {
-        throw new TypeError(`Invalid inherits for role "${rn}"`);
-      }
+      tmpRoles.set(k, r);
     }
 
-    // Validate userRoles
-    if (typeof obj.userRoles !== 'object' || obj.userRoles === null) {
-      throw new TypeError('Policy.userRoles must be an object');
-    }
-    for (const [uid, roles] of Object.entries(obj.userRoles as Record<string, unknown>)) {
-      if (!isStringArray(roles)) {
-        throw new TypeError(`Invalid roles for user "${uid}"`);
-      }
+    for (const [uid, arr] of Object.entries(obj.userRoles ?? {})) {
+      if (!Array.isArray(arr)) throw new TypeError(`Malformed userRoles for ${uid}`);
+      tmpUR.set(uid, new Set(arr as string[]));
     }
 
-    // All valid — apply
-    this.roles = Object.create(null);
-    for (const [k, v] of Object.entries(obj.roles as Record<string, Role>)) {
-      this.roles[k] = v;
-    }
-
-    this.userRoles = Object.create(null);
-    for (const [uid, arr] of Object.entries(obj.userRoles as Record<string, string[]>)) {
-      this.userRoles[uid] = new Set(arr);
-    }
+    // Atomic swap
+    this.roleDefs = tmpRoles;
+    this.userRoles = tmpUR;
+    this.rebuildResolved();
   }
 }

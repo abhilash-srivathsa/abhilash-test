@@ -8,8 +8,8 @@ interface Connection {
 }
 
 export class ConnectionPool {
-  private connections: Connection[] = [];
-  private readonly owned = new Set<string>(); // track IDs that belong to this pool
+  // Map-based storage — keyed by id. No array indices, no splice, no iteration bugs.
+  private pool = new Map<string, Connection>();
   private seq = 0;
   private readonly maxSize: number;
   private readonly maxIdleTime: number;
@@ -20,92 +20,84 @@ export class ConnectionPool {
     this.maxIdleTime = maxIdleTime;
   }
 
-  private createConnection(): Connection {
-    const conn: Connection = {
-      id: `conn_${++this.seq}_${Date.now()}`,
+  private mint(): Connection {
+    return {
+      id: `c${++this.seq}`,
       active: false,
       createdAt: Date.now(),
       lastUsed: Date.now(),
     };
-    this.owned.add(conn.id);
-    return conn;
   }
 
   acquire(): Connection | null {
-    // Evict stale idle connections first
+    // Purge stale idle entries first
     this.evictStale();
 
-    const idle = this.connections.find(c => !c.active);
-    if (idle) {
-      idle.active = true;
-      idle.lastUsed = Date.now();
-      return idle;
+    // Grab first idle
+    for (const conn of this.pool.values()) {
+      if (!conn.active) {
+        conn.active = true;
+        conn.lastUsed = Date.now();
+        return conn;
+      }
     }
 
-    if (this.connections.length < this.maxSize) {
-      const conn = this.createConnection();
-      conn.active = true;
-      this.connections.push(conn);
-      return conn;
+    // Grow if room
+    if (this.pool.size < this.maxSize) {
+      const c = this.mint();
+      c.active = true;
+      this.pool.set(c.id, c);
+      return c;
     }
 
     return null;
   }
 
   release(connection: Connection): void {
-    if (!this.owned.has(connection.id)) {
-      throw new Error(`Connection "${connection.id}" does not belong to this pool`);
+    if (!this.pool.has(connection.id)) {
+      throw new Error(`Connection ${connection.id} is not from this pool`);
     }
-    if (!connection.active) return; // already released — idempotent
     connection.active = false;
     connection.lastUsed = Date.now();
   }
 
-  // Use filter() to rebuild the array — no splice/index issues at all
+  // Map.delete() during Map iteration is safe per ES spec — no index shifting
   evictStale(): number {
-    const now = Date.now();
-    const before = this.connections.length;
-    this.connections = this.connections.filter(c => {
-      if (!c.active && now - c.lastUsed > this.maxIdleTime) {
-        this.owned.delete(c.id);
-        return false;
+    const cutoff = Date.now() - this.maxIdleTime;
+    let n = 0;
+    for (const [id, conn] of this.pool) {
+      if (!conn.active && conn.lastUsed < cutoff) {
+        this.pool.delete(id);
+        n++;
       }
-      return true;
-    });
-    return before - this.connections.length;
+    }
+    return n;
   }
 
-  // Frozen shallow copies — caller can't mutate pool internals
-  getAll(): readonly Connection[] {
-    return Object.freeze(this.connections.map(c => ({ ...c })));
+  getAll(): Connection[] {
+    return Array.from(this.pool.values(), c => ({ ...c }));
   }
 
   get size(): number {
-    return this.connections.length;
+    return this.pool.size;
   }
 
   get activeCount(): number {
     let n = 0;
-    for (const c of this.connections) if (c.active) n++;
+    for (const c of this.pool.values()) if (c.active) n++;
     return n;
   }
 
-  // Graceful: only destroy idle connections, refuse if any are active
   destroy(): void {
-    const busy = this.connections.filter(c => c.active);
-    if (busy.length > 0) {
-      throw new Error(`Cannot destroy pool: ${busy.length} connection(s) still active`);
+    for (const c of this.pool.values()) {
+      if (c.active) {
+        throw new Error('Cannot destroy: active connections remain');
+      }
     }
-    for (const c of this.connections) this.owned.delete(c.id);
-    this.connections = [];
+    this.pool.clear();
   }
 
   toJSON(): string {
-    // Expose only safe summary, not raw internal state
-    return JSON.stringify({
-      size: this.connections.length,
-      active: this.activeCount,
-      idle: this.connections.length - this.activeCount,
-    });
+    return JSON.stringify({ total: this.pool.size, active: this.activeCount });
   }
 }

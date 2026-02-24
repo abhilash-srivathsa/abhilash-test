@@ -1,123 +1,113 @@
 // Pub/Sub message broker with topic-based routing
 
-interface Message {
-  readonly id: string;
-  readonly topic: string;
-  readonly payload: unknown;
-  readonly timestamp: number;
+// Subscribers receive (topic, payload, metadata) — no mutable Message object exists
+type Subscriber = (topic: string, payload: unknown, meta: Readonly<{ id: string; ts: number }>) => Promise<void> | void;
+
+interface DeadLetter {
+  topic: string;
+  payload: unknown;
+  id: string;
+  reason: string;
 }
 
-interface DeliveryEnvelope {
-  message: Message;
-  attempt: number;
-  subscriberIndex: number;
-}
-
-type Subscriber = (message: Message) => Promise<void> | void;
-
-let idCounter = 0;
+let seq = 0;
 
 export class MessageBroker {
-  // Prototype-free topic store
-  private topics: { [topic: string]: Set<Subscriber> } = Object.create(null);
-  private deadLetterQueue: DeliveryEnvelope[] = [];
+  private channels = new Map<string, Set<Subscriber>>();
+  private dlq: DeadLetter[] = [];
   private readonly maxRetries: number;
-  private readonly maxDLQSize: number;
+  private readonly dlqCap: number;
 
-  constructor(maxRetries: number = 3, maxDLQSize: number = 1000) {
+  constructor(maxRetries: number = 3, dlqCap: number = 500) {
     this.maxRetries = maxRetries;
-    this.maxDLQSize = maxDLQSize;
+    this.dlqCap = dlqCap;
   }
 
   subscribe(topic: string, subscriber: Subscriber): () => void {
-    if (!(topic in this.topics)) {
-      this.topics[topic] = new Set();
+    if (!this.channels.has(topic)) {
+      this.channels.set(topic, new Set());
     }
-    this.topics[topic].add(subscriber); // Set prevents duplicates
-
-    return () => {
-      this.topics[topic]?.delete(subscriber);
-    };
+    this.channels.get(topic)!.add(subscriber);
+    return () => this.channels.get(topic)?.delete(subscriber);
   }
 
   unsubscribe(topic: string, subscriber: Subscriber): void {
-    this.topics[topic]?.delete(subscriber);
+    this.channels.get(topic)?.delete(subscriber);
   }
 
+  // Publish fans out to each subscriber with independent retry + backoff.
+  // No Message object is shared — each subscriber receives primitive args.
   async publish(topic: string, payload: unknown): Promise<void> {
-    const message: Message = Object.freeze({
-      id: `msg_${++idCounter}_${Date.now()}`,
-      topic,
-      payload,
-      timestamp: Date.now(),
-    });
+    const ch = this.channels.get(topic);
+    if (!ch || ch.size === 0) return;
 
-    const subs = this.topics[topic];
-    if (!subs || subs.size === 0) return;
+    const id = `m${++seq}`;
+    const ts = Date.now();
+    const meta = Object.freeze({ id, ts });
 
-    // Snapshot the subscriber set so mutations during delivery are safe
-    const snapshot = Array.from(subs);
+    // Snapshot into array so subscribe/unsubscribe during delivery is safe
+    const targets = Array.from(ch);
 
-    for (let i = 0; i < snapshot.length; i++) {
-      await this.deliver(message, snapshot[i], i);
-    }
+    await Promise.allSettled(
+      targets.map(sub => this.tryDeliver(sub, topic, payload, meta)),
+    );
   }
 
-  // Each subscriber gets its own delivery tracking via DeliveryEnvelope
-  // Backoff doubles each attempt: 50ms, 100ms, 200ms, ...
-  private async deliver(message: Message, subscriber: Subscriber, subIdx: number): Promise<void> {
-    let backoff = 50;
+  private async tryDeliver(
+    sub: Subscriber,
+    topic: string,
+    payload: unknown,
+    meta: Readonly<{ id: string; ts: number }>,
+  ): Promise<void> {
+    let pause = 100;
+    let lastErr: unknown;
 
-    for (let attempt = 1; attempt <= this.maxRetries + 1; attempt++) {
+    for (let n = 0; n <= this.maxRetries; n++) {
       try {
-        await subscriber(message);
-        return; // success
-      } catch {
-        if (attempt > this.maxRetries) {
-          // Cap DLQ size — drop oldest if full
-          if (this.deadLetterQueue.length >= this.maxDLQSize) {
-            this.deadLetterQueue.shift();
-          }
-          this.deadLetterQueue.push({
-            message,
-            attempt,
-            subscriberIndex: subIdx,
-          });
-          return;
+        // Each call receives fresh args — nothing to mutate
+        await sub(topic, payload, meta);
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (n < this.maxRetries) {
+          await new Promise(r => setTimeout(r, pause));
+          pause += pause; // double
         }
-        await new Promise(r => setTimeout(r, backoff));
-        backoff *= 2;
       }
     }
+
+    // Dead-letter with capped queue
+    if (this.dlq.length >= this.dlqCap) this.dlq.splice(0, 1);
+    this.dlq.push({
+      topic,
+      payload,
+      id: meta.id,
+      reason: lastErr instanceof Error ? lastErr.message : String(lastErr),
+    });
   }
 
-  getDeadLetters(): readonly DeliveryEnvelope[] {
-    return Object.freeze([...this.deadLetterQueue]);
+  getDeadLetters(): DeadLetter[] {
+    return this.dlq.map(d => ({ ...d }));
   }
 
   getDeadLetterCount(): number {
-    return this.deadLetterQueue.length;
+    return this.dlq.length;
   }
 
   getSubscribers(topic: string): Subscriber[] {
-    const s = this.topics[topic];
-    return s ? Array.from(s) : [];
+    return Array.from(this.channels.get(topic) ?? []);
   }
 
-  // Only count topics that actually have subscribers
   getTopicCount(): number {
     let n = 0;
-    for (const t in this.topics) {
-      if (this.topics[t].size > 0) n++;
+    for (const [, subs] of this.channels) {
+      if (subs.size > 0) n++;
     }
     return n;
   }
 
   clearAll(): void {
-    for (const t in this.topics) {
-      this.topics[t].clear();
-    }
-    this.deadLetterQueue = [];
-    this.topics = Object.create(null);
+    this.channels.clear();
+    this.dlq = [];
   }
 }
