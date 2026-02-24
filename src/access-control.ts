@@ -11,61 +11,84 @@ interface Role {
   inherits?: string[];
 }
 
-export class AccessControl {
-  // BUG: Uses Record - __proto__ key can corrupt the role store
-  private roles: Record<string, Role> = {};
-  private userRoles: Record<string, string[]> = {};
+// Simple glob-style matcher: supports trailing * only (e.g. "users.*" matches "users.list")
+function globMatch(pattern: string, value: string): boolean {
+  if (pattern === value) return true;
+  if (pattern.endsWith('*')) {
+    return value.startsWith(pattern.slice(0, -1));
+  }
+  return false;
+}
 
-  // BUG: No validation of role name - empty strings, special chars allowed
-  // BUG: Can overwrite existing role without warning
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every(e => typeof e === 'string');
+}
+
+function isPermission(v: unknown): v is Permission {
+  return (
+    typeof v === 'object' && v !== null &&
+    typeof (v as any).resource === 'string' &&
+    typeof (v as any).action === 'string'
+  );
+}
+
+export class AccessControl {
+  private roles: { [k: string]: Role } = Object.create(null);
+  private userRoles: { [k: string]: Set<string> } = Object.create(null);
+
   addRole(name: string, permissions: Permission[], inherits?: string[]): void {
+    if (!name || typeof name !== 'string') {
+      throw new Error('Role name must be a non-empty string');
+    }
     this.roles[name] = { name, permissions, inherits };
   }
 
-  // BUG: No check if role exists before assignment
-  // BUG: Same role can be assigned to user multiple times
   assignRole(userId: string, roleName: string): void {
-    if (!this.userRoles[userId]) {
-      this.userRoles[userId] = [];
+    if (!(roleName in this.roles)) {
+      throw new Error(`Role "${roleName}" does not exist`);
     }
-    this.userRoles[userId].push(roleName);
+    if (!(userId in this.userRoles)) {
+      this.userRoles[userId] = new Set();
+    }
+    this.userRoles[userId].add(roleName); // Set prevents duplicates
   }
 
-  // BUG: Recursive inheritance with no cycle detection - circular inherits cause stack overflow
-  // BUG: No caching of resolved permissions - recomputes full chain on every check
-  // BUG: Wildcard matching uses simple === not glob patterns
-  private getPermissions(roleName: string): Permission[] {
-    const role = this.roles[roleName];
-    if (!role) return [];
+  // Iterative BFS — walks inheritance via a queue, never recurses
+  private collectPermissions(roleName: string): Permission[] {
+    const perms: Permission[] = [];
+    const seen = new Set<string>();
+    const queue: string[] = [roleName];
 
-    const perms = [...role.permissions];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      if (seen.has(current)) continue; // cycle-safe
+      seen.add(current);
 
-    if (role.inherits) {
-      for (const parent of role.inherits) {
-        perms.push(...this.getPermissions(parent)); // BUG: infinite recursion on cycles
+      const role = this.roles[current];
+      if (!role) continue;
+
+      perms.push(...role.permissions);
+
+      if (role.inherits) {
+        for (const parent of role.inherits) {
+          if (!seen.has(parent)) queue.push(parent);
+        }
       }
     }
 
     return perms;
   }
 
-  // BUG: Admin bypass with no audit trail
-  // BUG: Returns true/false but no reason for denial - hard to debug
-  // BUG: No support for deny/negative permissions
+  // Glob-aware permission matching — wildcards only apply to their own dimension
   check(userId: string, resource: string, action: string): boolean {
-    const roles = this.userRoles[userId];
-    if (!roles) return false;
+    const assigned = this.userRoles[userId];
+    if (!assigned) return false;
 
-    for (const roleName of roles) {
-      const permissions = this.getPermissions(roleName);
+    for (const roleName of assigned) {
+      const permissions = this.collectPermissions(roleName);
 
       for (const perm of permissions) {
-        // BUG: Exact match only - no wildcard support like "users:*"
-        if (perm.resource === resource && perm.action === action) {
-          return true;
-        }
-        // BUG: Wildcard "*" grants everything with no restrictions
-        if (perm.resource === '*' || perm.action === '*') {
+        if (globMatch(perm.resource, resource) && globMatch(perm.action, action)) {
           return true;
         }
       }
@@ -74,33 +97,84 @@ export class AccessControl {
     return false;
   }
 
-  // BUG: Returns internal array reference for roles
   getUserRoles(userId: string): string[] {
-    return this.userRoles[userId] ?? [];
+    const s = this.userRoles[userId];
+    return s ? Array.from(s) : [];
   }
 
-  // BUG: Removing a role doesn't remove it from users who have it assigned
+  // Also clean up user assignments pointing to this role
   removeRole(roleName: string): void {
     delete this.roles[roleName];
+    for (const uid in this.userRoles) {
+      this.userRoles[uid].delete(roleName);
+    }
   }
 
-  // BUG: No validation that role exists
   revokeRole(userId: string, roleName: string): void {
-    const roles = this.userRoles[userId];
-    if (!roles) return;
-    const idx = roles.indexOf(roleName);
-    if (idx !== -1) roles.splice(idx, 1);
+    const s = this.userRoles[userId];
+    if (s) s.delete(roleName);
   }
 
-  // BUG: Exposes full permission structure including inherited chains
   exportPolicy(): string {
-    return JSON.stringify({ roles: this.roles, userRoles: this.userRoles });
+    const out: Record<string, unknown> = Object.create(null);
+    out.roles = this.roles;
+    const ur: Record<string, string[]> = Object.create(null);
+    for (const uid in this.userRoles) {
+      ur[uid] = Array.from(this.userRoles[uid]);
+    }
+    out.userRoles = ur;
+    return JSON.stringify(out);
   }
 
-  // BUG: Imports without validation - corrupts state on malformed input
+  // Per-field validation before importing
   importPolicy(data: string): void {
-    const parsed = JSON.parse(data);
-    this.roles = parsed.roles;
-    this.userRoles = parsed.userRoles;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(data);
+    } catch {
+      throw new SyntaxError('Invalid JSON in importPolicy');
+    }
+
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new TypeError('Policy must be an object');
+    }
+
+    const obj = parsed as Record<string, unknown>;
+
+    // Validate roles
+    if (typeof obj.roles !== 'object' || obj.roles === null) {
+      throw new TypeError('Policy.roles must be an object');
+    }
+    for (const [rn, rv] of Object.entries(obj.roles as Record<string, unknown>)) {
+      const r = rv as Record<string, unknown>;
+      if (typeof r.name !== 'string') throw new TypeError(`Invalid role name for key "${rn}"`);
+      if (!Array.isArray(r.permissions) || !r.permissions.every(isPermission)) {
+        throw new TypeError(`Invalid permissions for role "${rn}"`);
+      }
+      if (r.inherits !== undefined && !isStringArray(r.inherits)) {
+        throw new TypeError(`Invalid inherits for role "${rn}"`);
+      }
+    }
+
+    // Validate userRoles
+    if (typeof obj.userRoles !== 'object' || obj.userRoles === null) {
+      throw new TypeError('Policy.userRoles must be an object');
+    }
+    for (const [uid, roles] of Object.entries(obj.userRoles as Record<string, unknown>)) {
+      if (!isStringArray(roles)) {
+        throw new TypeError(`Invalid roles for user "${uid}"`);
+      }
+    }
+
+    // All valid — apply
+    this.roles = Object.create(null);
+    for (const [k, v] of Object.entries(obj.roles as Record<string, Role>)) {
+      this.roles[k] = v;
+    }
+
+    this.userRoles = Object.create(null);
+    for (const [uid, arr] of Object.entries(obj.userRoles as Record<string, string[]>)) {
+      this.userRoles[uid] = new Set(arr);
+    }
   }
 }

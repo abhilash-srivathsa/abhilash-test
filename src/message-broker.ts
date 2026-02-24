@@ -1,111 +1,123 @@
 // Pub/Sub message broker with topic-based routing
 
 interface Message {
-  id: string;
-  topic: string;
-  payload: any;
-  timestamp: number;
-  attempts: number;
+  readonly id: string;
+  readonly topic: string;
+  readonly payload: unknown;
+  readonly timestamp: number;
+}
+
+interface DeliveryEnvelope {
+  message: Message;
+  attempt: number;
+  subscriberIndex: number;
 }
 
 type Subscriber = (message: Message) => Promise<void> | void;
 
+let idCounter = 0;
+
 export class MessageBroker {
-  private topics: Record<string, Subscriber[]> = {};
-  private deadLetterQueue: Message[] = [];
-  private maxRetries: number;
+  // Prototype-free topic store
+  private topics: { [topic: string]: Set<Subscriber> } = Object.create(null);
+  private deadLetterQueue: DeliveryEnvelope[] = [];
+  private readonly maxRetries: number;
+  private readonly maxDLQSize: number;
 
-  constructor(maxRetries: number = 3) {
+  constructor(maxRetries: number = 3, maxDLQSize: number = 1000) {
     this.maxRetries = maxRetries;
+    this.maxDLQSize = maxDLQSize;
   }
 
-  // BUG: No limit on subscribers per topic - memory leak potential
-  // BUG: Same subscriber can be added multiple times
-  // BUG: No validation on topic name - empty string, __proto__ etc.
-  subscribe(topic: string, subscriber: Subscriber): void {
-    if (!this.topics[topic]) {
-      this.topics[topic] = [];
+  subscribe(topic: string, subscriber: Subscriber): () => void {
+    if (!(topic in this.topics)) {
+      this.topics[topic] = new Set();
     }
-    this.topics[topic].push(subscriber);
+    this.topics[topic].add(subscriber); // Set prevents duplicates
+
+    return () => {
+      this.topics[topic]?.delete(subscriber);
+    };
   }
 
-  // BUG: Uses indexOf for removal - doesn't work with anonymous/arrow functions
   unsubscribe(topic: string, subscriber: Subscriber): void {
-    const subs = this.topics[topic];
-    if (!subs) return;
-    const idx = subs.indexOf(subscriber);
-    if (idx !== -1) subs.splice(idx, 1);
+    this.topics[topic]?.delete(subscriber);
   }
 
-  // BUG: Message ID uses Math.random - collisions possible
-  // BUG: No message deduplication - same message can be published twice
-  // BUG: No backpressure - if subscribers are slow, publish keeps firing
-  async publish(topic: string, payload: any): Promise<void> {
-    const message: Message = {
-      id: Math.random().toString(36).slice(2),
+  async publish(topic: string, payload: unknown): Promise<void> {
+    const message: Message = Object.freeze({
+      id: `msg_${++idCounter}_${Date.now()}`,
       topic,
       payload,
       timestamp: Date.now(),
-      attempts: 0,
-    };
+    });
 
-    const subscribers = this.topics[topic];
-    if (!subscribers || subscribers.length === 0) {
-      // BUG: Messages to topics with no subscribers are silently lost
-      return;
-    }
+    const subs = this.topics[topic];
+    if (!subs || subs.size === 0) return;
 
-    // BUG: Iterates original array - if subscriber modifies the list, chaos
-    for (const sub of subscribers) {
-      await this.deliverWithRetry(message, sub);
+    // Snapshot the subscriber set so mutations during delivery are safe
+    const snapshot = Array.from(subs);
+
+    for (let i = 0; i < snapshot.length; i++) {
+      await this.deliver(message, snapshot[i], i);
     }
   }
 
-  // BUG: Retry logic mutates the original message's attempts counter
-  // BUG: No exponential backoff - retries immediately
-  // BUG: If all retries fail, error is swallowed
-  private async deliverWithRetry(message: Message, subscriber: Subscriber): Promise<void> {
-    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+  // Each subscriber gets its own delivery tracking via DeliveryEnvelope
+  // Backoff doubles each attempt: 50ms, 100ms, 200ms, ...
+  private async deliver(message: Message, subscriber: Subscriber, subIdx: number): Promise<void> {
+    let backoff = 50;
+
+    for (let attempt = 1; attempt <= this.maxRetries + 1; attempt++) {
       try {
-        message.attempts = attempt + 1;
         await subscriber(message);
-        return;
-      } catch (error) {
-        if (attempt === this.maxRetries) {
-          // BUG: Pushes mutable reference to dead letter queue
-          this.deadLetterQueue.push(message);
+        return; // success
+      } catch {
+        if (attempt > this.maxRetries) {
+          // Cap DLQ size — drop oldest if full
+          if (this.deadLetterQueue.length >= this.maxDLQSize) {
+            this.deadLetterQueue.shift();
+          }
+          this.deadLetterQueue.push({
+            message,
+            attempt,
+            subscriberIndex: subIdx,
+          });
+          return;
         }
-        // BUG: No delay between retries
+        await new Promise(r => setTimeout(r, backoff));
+        backoff *= 2;
       }
     }
   }
 
-  // BUG: Returns internal mutable array reference
-  getDeadLetters(): Message[] {
-    return this.deadLetterQueue;
+  getDeadLetters(): readonly DeliveryEnvelope[] {
+    return Object.freeze([...this.deadLetterQueue]);
   }
 
-  // BUG: Dead letter queue grows unbounded
-  // BUG: No way to replay/reprocess dead letters
   getDeadLetterCount(): number {
     return this.deadLetterQueue.length;
   }
 
-  // BUG: Returns internal subscriber array reference
   getSubscribers(topic: string): Subscriber[] {
-    return this.topics[topic] ?? [];
+    const s = this.topics[topic];
+    return s ? Array.from(s) : [];
   }
 
-  // BUG: Only counts top-level topic keys - doesn't verify subscribers exist
+  // Only count topics that actually have subscribers
   getTopicCount(): number {
-    return Object.keys(this.topics).length;
+    let n = 0;
+    for (const t in this.topics) {
+      if (this.topics[t].size > 0) n++;
+    }
+    return n;
   }
 
-  // BUG: Clears subscribers but doesn't clear dead letter queue
-  // BUG: In-flight messages still reference old subscriber arrays
   clearAll(): void {
-    for (const topic of Object.keys(this.topics)) {
-      this.topics[topic] = [];
+    for (const t in this.topics) {
+      this.topics[t].clear();
     }
+    this.deadLetterQueue = [];
+    this.topics = Object.create(null);
   }
 }

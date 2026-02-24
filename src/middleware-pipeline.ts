@@ -1,43 +1,63 @@
 // Express-like middleware pipeline
 
-type Context = Record<string, any>;
+type Context = Record<string, unknown>;
 type NextFn = () => Promise<void>;
 type Middleware = (ctx: Context, next: NextFn) => Promise<void> | void;
+
+interface MiddlewareError {
+  index: number;
+  error: Error;
+}
 
 export class MiddlewarePipeline {
   private stack: Middleware[] = [];
 
-  // BUG: No duplicate check - same middleware can be added multiple times
-  // BUG: No validation that middleware is a function
   use(middleware: Middleware): this {
+    if (typeof middleware !== 'function') {
+      throw new TypeError('Middleware must be a function');
+    }
     this.stack.push(middleware);
     return this;
   }
 
-  // BUG: Shared mutable context between all middlewares - no isolation
-  // BUG: If a middleware doesn't call next(), remaining middlewares silently skipped
-  // BUG: No timeout - a hanging middleware blocks the entire pipeline forever
-  // BUG: Error in one middleware kills the chain with no cleanup
+  // Linear loop — no recursive next() closure, no index mutation issues
+  // Each middleware runs in sequence; if it wants to "skip", it simply returns
   async execute(initialContext: Context = {}): Promise<Context> {
-    const ctx = initialContext;
-    let index = 0;
+    const ctx = { ...initialContext }; // shallow copy for isolation
+    const errors: MiddlewareError[] = [];
+    const snapshot = Array.from(this.stack); // freeze against mid-run mutations
 
-    const next = async (): Promise<void> => {
-      if (index >= this.stack.length) return;
+    for (let i = 0; i < snapshot.length; i++) {
+      let nextCalled = false;
 
-      const middleware = this.stack[index];
-      index++;
+      const next: NextFn = async () => {
+        nextCalled = true;
+      };
 
-      // BUG: If middleware returns a non-promise, errors aren't caught
-      // BUG: No try-catch means one middleware failure kills everything
-      await middleware(ctx, next);
-    };
+      try {
+        await Promise.resolve(snapshot[i](ctx, next));
+      } catch (err) {
+        errors.push({
+          index: i,
+          error: err instanceof Error ? err : new Error(String(err)),
+        });
+        break; // stop pipeline on first error
+      }
 
-    await next();
+      // If middleware didn't call next(), halt the chain (intentional short-circuit)
+      if (!nextCalled) break;
+    }
+
+    if (errors.length > 0) {
+      const e = errors[0];
+      const wrapper = new Error(`Pipeline halted at middleware[${e.index}]: ${e.error.message}`);
+      (wrapper as any).cause = e.error;
+      throw wrapper;
+    }
+
     return ctx;
   }
 
-  // BUG: Removes by reference - won't work for anonymous functions
   remove(middleware: Middleware): boolean {
     const idx = this.stack.indexOf(middleware);
     if (idx === -1) return false;
@@ -45,20 +65,21 @@ export class MiddlewarePipeline {
     return true;
   }
 
-  // BUG: Returns internal array reference
-  getMiddlewares(): Middleware[] {
-    return this.stack;
+  getMiddlewares(): readonly Middleware[] {
+    return Object.freeze([...this.stack]);
   }
 
-  // BUG: Executes all pipelines concurrently sharing same context
-  // If pipelines modify ctx, race conditions happen
+  // Run batch sequentially — each context is independent
   async executeBatch(contexts: Context[]): Promise<Context[]> {
-    return Promise.all(contexts.map(ctx => this.execute(ctx)));
+    const results: Context[] = [];
+    for (const ctx of contexts) {
+      results.push(await this.execute(ctx));
+    }
+    return results;
   }
 
-  // BUG: Clearing while execute is running leaves dangling references
   clear(): void {
-    this.stack.length = 0;
+    this.stack = [];
   }
 
   get length(): number {
