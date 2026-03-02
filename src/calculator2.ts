@@ -763,11 +763,11 @@ export class CommentManager {
   }
 
   /**
-   * Render comments as structured data for safe rendering
+   * Get comments as structured view objects for safe rendering
    * @param orgName - Organization to render comments for
    * @returns Array of comment view objects safe for any rendering layer
    */
-  renderCommentsAsHtml(orgName: string): { author: string; content: string; id: number }[] {
+  getCommentViews(orgName: string): { author: string; content: string; id: number }[] {
     const comments = this.getCommentsByOrganization(orgName);
     return comments.map(c => ({
       id: c.id,
@@ -810,8 +810,9 @@ export class CommentManager {
    * @returns The archived comments that were removed
    */
   archiveOldComments(days: number): Comment[] {
+    const safeDays = Math.max(0, Math.floor(days)) || 0;
     const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - days);
+    cutoff.setDate(cutoff.getDate() - safeDays);
     const keep: Comment[] = [];
     const archived: Comment[] = [];
     for (const c of this.comments) {
@@ -849,8 +850,10 @@ export class CommentManager {
   evaluateCommentExpression(commentId: number): number {
     const comment = this.getCommentById(commentId);
     if (!comment) return NaN;
-    const tokens = comment.content.trim().match(/(\d+\.?\d*|[+\-*/()])/g);
+    const raw = comment.content.trim();
+    const tokens = raw.match(/(\d+\.?\d*|[+\-*/()])/g);
     if (!tokens) return NaN;
+    if (tokens.join('') !== raw.replace(/\s/g, '')) return NaN;
     let pos = 0;
     const peek = () => tokens[pos];
     const consume = () => tokens[pos++];
