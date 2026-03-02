@@ -761,4 +761,132 @@ export class CommentManager {
     const safeSize = Math.max(1, Math.floor(pageSize));
     return this.comments.slice(safePage * safeSize, safePage * safeSize + safeSize);
   }
+
+  /**
+   * Get comments as structured view objects for safe rendering
+   * @param orgName - Organization to render comments for
+   * @returns Array of comment view objects safe for any rendering layer
+   */
+  getCommentViews(orgName: string): { author: string; content: string; id: number }[] {
+    const comments = this.getCommentsByOrganization(orgName);
+    return comments.map(c => ({
+      id: c.id,
+      author: c.author,
+      content: c.content,
+    }));
+  }
+
+  /**
+   * Sort comments by a supported field
+   * @param field - The field name to sort by
+   * @param ascending - Sort direction
+   * @returns Sorted comments array
+   */
+  sortCommentsBy(field: string, ascending: boolean = true): Comment[] {
+    const accessors = new Map<string, (c: Comment) => number | string>([
+      ['id', (c) => c.id],
+      ['author', (c) => c.author],
+      ['content', (c) => c.content],
+      ['organizationName', (c) => c.organizationName],
+      ['createdAt', (c) => c.createdAt.getTime()],
+      ['updatedAt', (c) => c.updatedAt.getTime()],
+    ]);
+    const accessor = accessors.get(field);
+    if (!accessor) return [...this.comments];
+    const sorted = [...this.comments];
+    sorted.sort((a, b) => {
+      const valA = accessor(a);
+      const valB = accessor(b);
+      if (valA < valB) return ascending ? -1 : 1;
+      if (valA > valB) return ascending ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }
+
+  /**
+   * Archive and remove comments older than N days
+   * @param days - Age threshold in days
+   * @returns The archived comments that were removed
+   */
+  archiveOldComments(days: number): Comment[] {
+    const safeDays = Math.max(0, Math.floor(days)) || 0;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - safeDays);
+    const keep: Comment[] = [];
+    const archived: Comment[] = [];
+    for (const c of this.comments) {
+      (c.createdAt < cutoff ? archived : keep).push(c);
+    }
+    this.comments = keep;
+    return archived;
+  }
+
+  /**
+   * Get statistics about comments in the system
+   * @returns Object with various comment statistics
+   */
+  getCommentStats(): { total: number; uniqueAuthorCount: number; avgLength: number; oldestTimestamp: number | null } {
+    const total = this.comments.length;
+    if (total === 0) {
+      return { total: 0, uniqueAuthorCount: 0, avgLength: 0, oldestTimestamp: null };
+    }
+    const authorSet = new Set(this.comments.map(c => c.author));
+    const totalLen = this.comments.reduce((s, c) => s + c.content.length, 0);
+    const oldest = Math.min(...this.comments.map(c => c.createdAt.getTime()));
+    return {
+      total,
+      uniqueAuthorCount: authorSet.size,
+      avgLength: totalLen / total,
+      oldestTimestamp: oldest,
+    };
+  }
+
+  /**
+   * Evaluate a simple math expression found in comment content
+   * @param commentId - The comment to evaluate
+   * @returns The result of the expression, or NaN if invalid
+   */
+  evaluateCommentExpression(commentId: number): number {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return NaN;
+    const raw = comment.content.trim();
+    const tokens = raw.match(/(\d+\.?\d*|[+\-*/()])/g);
+    if (!tokens) return NaN;
+    if (tokens.join('') !== raw.replace(/\s/g, '')) return NaN;
+    let pos = 0;
+    const peek = () => tokens[pos];
+    const consume = () => tokens[pos++];
+    const parseNum = (): number => {
+      if (peek() === '(') {
+        consume(); // '('
+        const val = parseExpr();
+        consume(); // ')'
+        return val;
+      }
+      const tok = consume();
+      const n = Number(tok);
+      return Number.isFinite(n) ? n : NaN;
+    };
+    const parseTerm = (): number => {
+      let left = parseNum();
+      while (peek() === '*' || peek() === '/') {
+        const op = consume();
+        const right = parseNum();
+        left = op === '*' ? left * right : right !== 0 ? left / right : NaN;
+      }
+      return left;
+    };
+    const parseExpr = (): number => {
+      let left = parseTerm();
+      while (peek() === '+' || peek() === '-') {
+        const op = consume();
+        const right = parseTerm();
+        left = op === '+' ? left + right : left - right;
+      }
+      return left;
+    };
+    const result = parseExpr();
+    return pos === tokens.length && Number.isFinite(result) ? result : NaN;
+  }
 }
