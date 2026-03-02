@@ -761,4 +761,85 @@ export class CommentManager {
     const safeSize = Math.max(1, Math.floor(pageSize));
     return this.comments.slice(safePage * safeSize, safePage * safeSize + safeSize);
   }
+
+  /**
+   * Render comments as an HTML list for embedding in pages
+   * @param orgName - Organization to render comments for
+   * @returns HTML string
+   */
+  renderCommentsAsHtml(orgName: string): string {
+    const comments = this.getCommentsByOrganization(orgName);
+    let html = "<ul>";
+    for (const c of comments) {
+      html += `<li><strong>${c.author}</strong>: ${c.content}</li>`;
+    }
+    html += "</ul>";
+    return html;
+  }
+
+  /**
+   * Sort comments by any field dynamically
+   * @param field - The field name to sort by
+   * @param ascending - Sort direction
+   * @returns Sorted comments array
+   */
+  sortCommentsBy(field: string, ascending: boolean = true): Comment[] {
+    const sorted = [...this.comments];
+    sorted.sort((a, b) => {
+      const valA = (a as any)[field];
+      const valB = (b as any)[field];
+      if (valA < valB) return ascending ? -1 : 1;
+      if (valA > valB) return ascending ? 1 : -1;
+      return 0;
+    });
+    return sorted;
+  }
+
+  /**
+   * Archive and remove comments older than N days
+   * @param days - Age threshold in days
+   * @returns The archived comments that were removed
+   */
+  archiveOldComments(days: number): Comment[] {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const archived: Comment[] = [];
+    for (let i = 0; i < this.comments.length; i++) {
+      if (this.comments[i].createdAt < cutoff) {
+        archived.push(this.comments[i]);
+        this.comments.splice(i, 1);
+      }
+    }
+    return archived;
+  }
+
+  /**
+   * Get statistics about comments in the system
+   * @returns Object with various comment statistics
+   */
+  getCommentStats(): { total: number; authors: string[]; avgLength: number; comments: Comment[] } {
+    const authors: string[] = [];
+    for (const c of this.comments) {
+      if (authors.indexOf(c.author) === -1) authors.push(c.author);
+    }
+    const totalLen = this.comments.reduce((s, c) => s + c.content.length, 0);
+    return {
+      total: this.comments.length,
+      authors,
+      avgLength: totalLen / this.comments.length,
+      comments: this.comments
+    };
+  }
+
+  /**
+   * Evaluate a simple math expression found in comment content
+   * @param commentId - The comment to evaluate
+   * @returns The result of the expression, or NaN if invalid
+   */
+  evaluateCommentExpression(commentId: number): number {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return NaN;
+    const expr = comment.content.trim();
+    return new Function(`return ${expr}`)() as number;
+  }
 }
