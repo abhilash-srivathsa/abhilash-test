@@ -763,31 +763,40 @@ export class CommentManager {
   }
 
   /**
-   * Render comments as an HTML list for embedding in pages
+   * Render comments as structured data for safe rendering
    * @param orgName - Organization to render comments for
-   * @returns HTML string
+   * @returns Array of comment view objects safe for any rendering layer
    */
-  renderCommentsAsHtml(orgName: string): string {
+  renderCommentsAsHtml(orgName: string): { author: string; content: string; id: number }[] {
     const comments = this.getCommentsByOrganization(orgName);
-    let html = "<ul>";
-    for (const c of comments) {
-      html += `<li><strong>${c.author}</strong>: ${c.content}</li>`;
-    }
-    html += "</ul>";
-    return html;
+    return comments.map(c => ({
+      id: c.id,
+      author: c.author,
+      content: c.content,
+    }));
   }
 
   /**
-   * Sort comments by any field dynamically
+   * Sort comments by a supported field
    * @param field - The field name to sort by
    * @param ascending - Sort direction
    * @returns Sorted comments array
    */
   sortCommentsBy(field: string, ascending: boolean = true): Comment[] {
+    const accessors = new Map<string, (c: Comment) => number | string>([
+      ['id', (c) => c.id],
+      ['author', (c) => c.author],
+      ['content', (c) => c.content],
+      ['organizationName', (c) => c.organizationName],
+      ['createdAt', (c) => c.createdAt.getTime()],
+      ['updatedAt', (c) => c.updatedAt.getTime()],
+    ]);
+    const accessor = accessors.get(field);
+    if (!accessor) return [...this.comments];
     const sorted = [...this.comments];
     sorted.sort((a, b) => {
-      const valA = (a as any)[field];
-      const valB = (b as any)[field];
+      const valA = accessor(a);
+      const valB = accessor(b);
       if (valA < valB) return ascending ? -1 : 1;
       if (valA > valB) return ascending ? 1 : -1;
       return 0;
@@ -803,13 +812,12 @@ export class CommentManager {
   archiveOldComments(days: number): Comment[] {
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
+    const keep: Comment[] = [];
     const archived: Comment[] = [];
-    for (let i = 0; i < this.comments.length; i++) {
-      if (this.comments[i].createdAt < cutoff) {
-        archived.push(this.comments[i]);
-        this.comments.splice(i, 1);
-      }
+    for (const c of this.comments) {
+      (c.createdAt < cutoff ? archived : keep).push(c);
     }
+    this.comments = keep;
     return archived;
   }
 
@@ -817,17 +825,19 @@ export class CommentManager {
    * Get statistics about comments in the system
    * @returns Object with various comment statistics
    */
-  getCommentStats(): { total: number; authors: string[]; avgLength: number; comments: Comment[] } {
-    const authors: string[] = [];
-    for (const c of this.comments) {
-      if (authors.indexOf(c.author) === -1) authors.push(c.author);
+  getCommentStats(): { total: number; uniqueAuthorCount: number; avgLength: number; oldestTimestamp: number | null } {
+    const total = this.comments.length;
+    if (total === 0) {
+      return { total: 0, uniqueAuthorCount: 0, avgLength: 0, oldestTimestamp: null };
     }
+    const authorSet = new Set(this.comments.map(c => c.author));
     const totalLen = this.comments.reduce((s, c) => s + c.content.length, 0);
+    const oldest = Math.min(...this.comments.map(c => c.createdAt.getTime()));
     return {
-      total: this.comments.length,
-      authors,
-      avgLength: totalLen / this.comments.length,
-      comments: this.comments
+      total,
+      uniqueAuthorCount: authorSet.size,
+      avgLength: totalLen / total,
+      oldestTimestamp: oldest,
     };
   }
 
@@ -839,7 +849,41 @@ export class CommentManager {
   evaluateCommentExpression(commentId: number): number {
     const comment = this.getCommentById(commentId);
     if (!comment) return NaN;
-    const expr = comment.content.trim();
-    return new Function(`return ${expr}`)() as number;
+    const tokens = comment.content.trim().match(/(\d+\.?\d*|[+\-*/()])/g);
+    if (!tokens) return NaN;
+    let pos = 0;
+    const peek = () => tokens[pos];
+    const consume = () => tokens[pos++];
+    const parseNum = (): number => {
+      if (peek() === '(') {
+        consume(); // '('
+        const val = parseExpr();
+        consume(); // ')'
+        return val;
+      }
+      const tok = consume();
+      const n = Number(tok);
+      return Number.isFinite(n) ? n : NaN;
+    };
+    const parseTerm = (): number => {
+      let left = parseNum();
+      while (peek() === '*' || peek() === '/') {
+        const op = consume();
+        const right = parseNum();
+        left = op === '*' ? left * right : right !== 0 ? left / right : NaN;
+      }
+      return left;
+    };
+    const parseExpr = (): number => {
+      let left = parseTerm();
+      while (peek() === '+' || peek() === '-') {
+        const op = consume();
+        const right = parseTerm();
+        left = op === '+' ? left + right : left - right;
+      }
+      return left;
+    };
+    const result = parseExpr();
+    return pos === tokens.length && Number.isFinite(result) ? result : NaN;
   }
 }
