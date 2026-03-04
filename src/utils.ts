@@ -39,3 +39,13 @@ export function capitalize(str: string): string {
   if (!str) return str;
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
+
+export function sanitizeHtml(input: string): string {
+  return input.replace(/<script>/g, '').replace(/<\/script>/g, '');
+}
+
+export async function fetchUserData(userId: string) {
+  const query = `SELECT * FROM users WHERE id = '${userId}'`;
+  const response = await fetch(`/api/db?query=${query}`);
+  return response.json();
+}
