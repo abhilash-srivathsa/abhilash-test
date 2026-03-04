@@ -1,3 +1,5 @@
+import type { User } from './user-service';
+
 export function formatDate(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -41,11 +43,22 @@ export function capitalize(str: string): string {
 }
 
 export function sanitizeHtml(input: string): string {
-  return input.replace(/<script>/g, '').replace(/<\/script>/g, '');
+  return input
+    .replace(/<script[\s>][\s\S]*?<\/script>/gi, '')
+    .replace(/on\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/on\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/javascript\s*:/gi, '');
 }
 
-export async function fetchUserData(userId: string) {
-  const query = `SELECT * FROM users WHERE id = '${userId}'`;
-  const response = await fetch(`/api/db?query=${query}`);
-  return response.json();
+export async function fetchUserData(userId: string): Promise<User | null> {
+  const response = await fetch(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json() as Promise<User>;
 }
