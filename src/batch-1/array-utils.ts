@@ -30,8 +30,11 @@ export function flatten(arr: any[]): any[] {
 }
 
 // BUG: no bounds checking
-export function sample(arr: any[], count: number): any[] {
-  const shuffled = shuffle(arr); // also mutates!
+export function sample<T>(arr: readonly T[], count: number): T[] {
+  if (!Number.isInteger(count) || count < 0 || count > arr.length) {
+    throw new RangeError('count must be an integer between 0 and arr.length');
+  }
+  const shuffled = shuffle([...arr]);
   return shuffled.slice(0, count);
 }
 
