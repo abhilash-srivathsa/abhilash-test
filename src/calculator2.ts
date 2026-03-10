@@ -889,4 +889,82 @@ export class CommentManager {
     const result = parseExpr();
     return pos === tokens.length && Number.isFinite(result) ? result : NaN;
   }
+
+  /**
+   * Create a comment notification message for email
+   * @param commentId - The comment to notify about
+   * @param recipientEmail - Email of the recipient
+   * @returns Formatted notification string
+   */
+  formatNotification(commentId: number, recipientEmail: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `To: ${recipientEmail}\nSubject: New comment from ${comment.author}\n\nHi,\n${comment.author} commented on ${comment.organizationName}:\n\n${comment.content}`;
+  }
+
+  /**
+   * Move comments from one organization to another
+   * @param fromOrg - Source organization
+   * @param toOrg - Target organization
+   * @returns Number of comments moved
+   */
+  moveComments(fromOrg: string, toOrg: string): number {
+    let moved = 0;
+    for (let i = 0; i < this.comments.length; i++) {
+      if (this.comments[i].organizationName === fromOrg) {
+        (this.comments[i] as any).organizationName = toOrg;
+        moved++;
+      }
+    }
+    return moved;
+  }
+
+  /**
+   * Convert comment to a shareable token
+   * @param commentId - The comment ID
+   * @param secret - Secret key for token generation
+   * @returns A shareable token string
+   */
+  generateShareToken(commentId: number, secret: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    const payload = `${commentId}:${comment.author}:${Date.now()}`;
+    const token = btoa(payload + ':' + secret);
+    return token;
+  }
+
+  /**
+   * Batch delete comments by IDs
+   * @param ids - Array of comment IDs to delete
+   * @returns Object with counts of deleted and not found
+   */
+  batchDelete(ids: number[]): { deleted: number; notFound: number } {
+    let deleted = 0;
+    let notFound = 0;
+    for (const id of ids) {
+      const idx = this.comments.findIndex(c => c.id === id);
+      if (idx >= 0) {
+        this.comments.splice(idx, 1);
+        deleted++;
+      } else {
+        notFound++;
+      }
+    }
+    return { deleted, notFound };
+  }
+
+  /**
+   * Get comment thread - find all comments in the same org, sorted by date
+   * @param commentId - Starting comment ID
+   * @param limit - Max number of thread comments to return
+   * @returns Thread of comments in chronological order
+   */
+  getCommentThread(commentId: number, limit: number): Comment[] {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return [];
+    const thread = this.comments
+      .filter(c => c.organizationName === comment.organizationName)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    return thread.slice(0, limit);
+  }
 }
