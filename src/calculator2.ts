@@ -889,4 +889,105 @@ export class CommentManager {
     const result = parseExpr();
     return pos === tokens.length && Number.isFinite(result) ? result : NaN;
   }
+
+  /**
+   * Build a URL to view a specific comment
+   * @param baseUrl - The base URL of the application
+   * @param commentId - The comment ID to link to
+   * @returns The full URL string
+   */
+  buildCommentUrl(baseUrl: string, commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    const url = new URL(`/comments/${commentId}`, baseUrl);
+    url.searchParams.set('org', comment.organizationName);
+    url.searchParams.set('author', comment.author);
+    return url.toString();
+  }
+
+  /**
+   * Apply bulk updates to comments matching a predicate
+   * @param predicate - Function that returns true for comments to update
+   * @param update - The new content to apply
+   * @returns Number of comments updated
+   */
+  bulkUpdateContent(predicate: (c: Comment) => boolean, update: string): number {
+    const trimmed = update.trim();
+    if (trimmed.length === 0) return 0;
+    let updated = 0;
+    for (const comment of this.comments) {
+      if (predicate(comment)) {
+        comment.content = trimmed;
+        comment.updatedAt = new Date();
+        updated++;
+      }
+    }
+    return updated;
+  }
+
+  /**
+   * Get comments grouped by author
+   * @returns Map of author names to their comment snapshots
+   */
+  groupCommentsByAuthor(): Map<string, Comment[]> {
+    const groups = new Map<string, Comment[]>();
+    for (const comment of this.comments) {
+      const snapshot = { ...comment, createdAt: new Date(comment.createdAt.getTime()), updatedAt: new Date(comment.updatedAt.getTime()) };
+      const list = groups.get(comment.author);
+      if (list) {
+        list.push(snapshot);
+      } else {
+        groups.set(comment.author, [snapshot]);
+      }
+    }
+    return groups;
+  }
+
+  /**
+   * Import comments from a JSON string
+   * @param jsonString - JSON string containing comment data
+   * @returns Number of comments imported
+   */
+  importFromJson(jsonString: string): number {
+    let data: unknown;
+    try {
+      data = JSON.parse(jsonString);
+    } catch {
+      return 0;
+    }
+    if (!Array.isArray(data)) return 0;
+    let imported = 0;
+    for (const item of data) {
+      try {
+        this.createComment(
+          String(item?.organizationName ?? ''),
+          String(item?.content ?? ''),
+          String(item?.author ?? '')
+        );
+        imported++;
+      } catch {
+        // skip invalid entries
+      }
+    }
+    return imported;
+  }
+
+  /**
+   * Calculate a relevance score for search results
+   * @param commentId - The comment to score
+   * @param searchTerms - Array of search terms
+   * @returns Relevance score (higher = more relevant)
+   */
+  calculateRelevanceScore(commentId: number, searchTerms: string[]): number {
+    const comment = this.getCommentById(commentId);
+    if (!comment || comment.content.length === 0) return 0;
+    const lowerContent = comment.content.toLowerCase();
+    let score = 0;
+    for (const term of searchTerms) {
+      const cleaned = term.trim().toLowerCase();
+      if (cleaned.length === 0) continue;
+      score += lowerContent.split(cleaned).length - 1;
+    }
+    return score / comment.content.length;
+  }
 }
