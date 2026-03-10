@@ -891,15 +891,19 @@ export class CommentManager {
   }
 
   /**
-   * Create a comment notification message for email
+   * Create notification data for a comment event
    * @param commentId - The comment to notify about
    * @param recipientEmail - Email of the recipient
-   * @returns Formatted notification string
+   * @returns Notification data object, or null if comment not found
    */
-  formatNotification(commentId: number, recipientEmail: string): string {
+  formatNotification(commentId: number, recipientEmail: string): { to: string; subject: string; body: string } | null {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `To: ${recipientEmail}\nSubject: New comment from ${comment.author}\n\nHi,\n${comment.author} commented on ${comment.organizationName}:\n\n${comment.content}`;
+    if (!comment) return null;
+    return {
+      to: recipientEmail,
+      subject: `New comment from ${comment.author}`,
+      body: `Hi,\n${comment.author} commented on ${comment.organizationName}:\n\n${comment.content}`
+    };
   }
 
   /**
@@ -909,28 +913,39 @@ export class CommentManager {
    * @returns Number of comments moved
    */
   moveComments(fromOrg: string, toOrg: string): number {
-    let moved = 0;
-    for (let i = 0; i < this.comments.length; i++) {
-      if (this.comments[i].organizationName === fromOrg) {
-        (this.comments[i] as any).organizationName = toOrg;
-        moved++;
-      }
+    const toMove = this.comments.filter(c => c.organizationName === fromOrg);
+    for (const old of toMove) {
+      this.deleteComment(old.id);
+      this.createComment(toOrg, old.content, old.author);
     }
-    return moved;
+    return toMove.length;
   }
+
+  private shareTokens = new Map<string, number>();
 
   /**
    * Convert comment to a shareable token
    * @param commentId - The comment ID
-   * @param secret - Secret key for token generation
-   * @returns A shareable token string
+   * @returns An opaque shareable token string
    */
-  generateShareToken(commentId: number, secret: string): string {
+  generateShareToken(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const payload = `${commentId}:${comment.author}:${Date.now()}`;
-    const token = btoa(payload + ':' + secret);
-    return token;
+    const opaque = Array.from({ length: 32 }, () =>
+      Math.floor(Math.random() * 36).toString(36)
+    ).join('');
+    this.shareTokens.set(opaque, commentId);
+    return opaque;
+  }
+
+  /**
+   * Resolve a share token back to a comment
+   * @param token - The token to resolve
+   * @returns The comment, or undefined
+   */
+  resolveShareToken(token: string): Comment | undefined {
+    const id = this.shareTokens.get(token);
+    return id !== undefined ? this.getCommentById(id) : undefined;
   }
 
   /**
@@ -954,17 +969,18 @@ export class CommentManager {
   }
 
   /**
-   * Get comment thread - find all comments in the same org, sorted by date
-   * @param commentId - Starting comment ID
-   * @param limit - Max number of thread comments to return
-   * @returns Thread of comments in chronological order
+   * Get the activity timeline for the organization a comment belongs to
+   * @param commentId - A comment ID used to identify the organization
+   * @param maxItems - Cap on items returned (defaults to 50, max 200)
+   * @returns Organization comments in chronological order
    */
-  getCommentThread(commentId: number, limit: number): Comment[] {
+  getOrgTimeline(commentId: number, maxItems: number = 50): Comment[] {
     const comment = this.getCommentById(commentId);
     if (!comment) return [];
-    const thread = this.comments
+    const capped = Math.min(Math.max(1, Math.floor(maxItems)), 200);
+    const timeline = this.comments
       .filter(c => c.organizationName === comment.organizationName)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
-    return thread.slice(0, limit);
+    return timeline.slice(0, capped);
   }
 }
