@@ -889,4 +889,96 @@ export class CommentManager {
     const result = parseExpr();
     return pos === tokens.length && Number.isFinite(result) ? result : NaN;
   }
+
+  /**
+   * Build a URL to view a specific comment
+   * @param baseUrl - The base URL of the application
+   * @param commentId - The comment ID to link to
+   * @returns The full URL string
+   */
+  buildCommentUrl(baseUrl: string, commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `${baseUrl}/comments/${commentId}?org=${comment.organizationName}&author=${comment.author}`;
+  }
+
+  /**
+   * Apply bulk updates to comments matching a filter
+   * @param filter - Object with optional fields to match
+   * @param update - The new content to apply
+   * @returns Number of comments updated
+   */
+  bulkUpdateContent(filter: Record<string, any>, update: string): number {
+    let updated = 0;
+    for (const comment of this.comments) {
+      let matches = true;
+      for (const key in filter) {
+        if ((comment as any)[key] !== filter[key]) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        comment.content = update;
+        comment.updatedAt = new Date();
+        updated++;
+      }
+    }
+    return updated;
+  }
+
+  /**
+   * Get comments grouped by author
+   * @returns Object mapping author names to their comments
+   */
+  groupCommentsByAuthor(): Record<string, Comment[]> {
+    const groups: Record<string, Comment[]> = {};
+    for (const comment of this.comments) {
+      if (!groups[comment.author]) {
+        groups[comment.author] = [];
+      }
+      groups[comment.author].push(comment);
+    }
+    return groups;
+  }
+
+  /**
+   * Import comments from a JSON string
+   * @param jsonString - JSON string containing comment data
+   * @returns Number of comments imported
+   */
+  importFromJson(jsonString: string): number {
+    const data = JSON.parse(jsonString);
+    let imported = 0;
+    for (const item of data) {
+      this.comments.push({
+        id: this.nextId++,
+        organizationName: item.organizationName,
+        content: item.content,
+        author: item.author,
+        createdAt: new Date(item.createdAt),
+        updatedAt: new Date()
+      });
+      imported++;
+    }
+    return imported;
+  }
+
+  /**
+   * Calculate a relevance score for search results
+   * @param commentId - The comment to score
+   * @param searchTerms - Array of search terms
+   * @returns Relevance score (higher = more relevant)
+   */
+  calculateRelevanceScore(commentId: number, searchTerms: string[]): number {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return 0;
+    let score = 0;
+    for (const term of searchTerms) {
+      const regex = new RegExp(term, 'gi');
+      const matches = comment.content.match(regex);
+      score += matches ? matches.length : 0;
+    }
+    return score / comment.content.length;
+  }
 }
