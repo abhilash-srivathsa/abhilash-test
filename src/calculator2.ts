@@ -891,6 +891,97 @@ export class CommentManager {
   }
 
   /**
+   * Create notification data for a comment event
+   * @param commentId - The comment to notify about
+   * @param recipientEmail - Email of the recipient
+   * @returns Notification data object, or null if comment not found
+   */
+  formatNotification(commentId: number, recipientEmail: string): { to: string; subject: string; body: string } | null {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return null;
+    return {
+      to: recipientEmail,
+      subject: `New comment from ${comment.author}`,
+      body: `Hi,\n${comment.author} commented on ${comment.organizationName}:\n\n${comment.content}`
+    };
+  }
+
+  /**
+   * Move comments from one organization to another
+   * @param fromOrg - Source organization
+   * @param toOrg - Target organization
+   * @returns Number of comments moved
+   */
+  moveComments(fromOrg: string, toOrg: string): number {
+    const toMove = this.comments.filter(c => c.organizationName === fromOrg);
+    for (const old of toMove) {
+      this.deleteComment(old.id);
+      this.createComment(toOrg, old.content, old.author);
+    }
+    return toMove.length;
+  }
+
+  private shareTokens = new Map<string, number>();
+
+  /**
+   * Convert comment to a shareable token
+   * @param commentId - The comment ID
+   * @returns An opaque shareable token string
+   */
+  generateShareToken(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    const opaque = Array.from({ length: 32 }, () =>
+      Math.floor(Math.random() * 36).toString(36)
+    ).join('');
+    this.shareTokens.set(opaque, commentId);
+    return opaque;
+  }
+
+  /**
+   * Resolve a share token back to a comment
+   * @param token - The token to resolve
+   * @returns The comment, or undefined
+   */
+  resolveShareToken(token: string): Comment | undefined {
+    const id = this.shareTokens.get(token);
+    return id !== undefined ? this.getCommentById(id) : undefined;
+  }
+
+  /**
+   * Batch delete comments by IDs
+   * @param ids - Array of comment IDs to delete
+   * @returns Object with counts of deleted and not found
+   */
+  batchDelete(ids: number[]): { deleted: number; notFound: number } {
+    let deleted = 0;
+    let notFound = 0;
+    for (const id of ids) {
+      const idx = this.comments.findIndex(c => c.id === id);
+      if (idx >= 0) {
+        this.comments.splice(idx, 1);
+        deleted++;
+      } else {
+        notFound++;
+      }
+    }
+    return { deleted, notFound };
+  }
+
+  /**
+   * Get the activity timeline for the organization a comment belongs to
+   * @param commentId - A comment ID used to identify the organization
+   * @param maxItems - Cap on items returned (defaults to 50, max 200)
+   * @returns Organization comments in chronological order
+   */
+  getOrgTimeline(commentId: number, maxItems: number = 50): Comment[] {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return [];
+    const capped = Math.min(Math.max(1, Math.floor(maxItems)), 200);
+    const timeline = this.comments
+      .filter(c => c.organizationName === comment.organizationName)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+    return timeline.slice(0, capped);
    * Build a URL to view a specific comment
    * @param baseUrl - The base URL of the application
    * @param commentId - The comment ID to link to
