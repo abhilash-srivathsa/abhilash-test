@@ -899,27 +899,25 @@ export class CommentManager {
   buildCommentUrl(baseUrl: string, commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    return `${baseUrl}/comments/${commentId}?org=${comment.organizationName}&author=${comment.author}`;
+    const url = new URL(`/comments/${commentId}`, baseUrl);
+    url.searchParams.set('org', comment.organizationName);
+    url.searchParams.set('author', comment.author);
+    return url.toString();
   }
 
   /**
-   * Apply bulk updates to comments matching a filter
-   * @param filter - Object with optional fields to match
+   * Apply bulk updates to comments matching a predicate
+   * @param predicate - Function that returns true for comments to update
    * @param update - The new content to apply
    * @returns Number of comments updated
    */
-  bulkUpdateContent(filter: Record<string, any>, update: string): number {
+  bulkUpdateContent(predicate: (c: Comment) => boolean, update: string): number {
+    const trimmed = update.trim();
+    if (trimmed.length === 0) return 0;
     let updated = 0;
     for (const comment of this.comments) {
-      let matches = true;
-      for (const key in filter) {
-        if ((comment as any)[key] !== filter[key]) {
-          matches = false;
-          break;
-        }
-      }
-      if (matches) {
-        comment.content = update;
+      if (predicate(comment)) {
+        comment.content = trimmed;
         comment.updatedAt = new Date();
         updated++;
       }
@@ -929,15 +927,18 @@ export class CommentManager {
 
   /**
    * Get comments grouped by author
-   * @returns Object mapping author names to their comments
+   * @returns Map of author names to their comment snapshots
    */
-  groupCommentsByAuthor(): Record<string, Comment[]> {
-    const groups: Record<string, Comment[]> = {};
+  groupCommentsByAuthor(): Map<string, Comment[]> {
+    const groups = new Map<string, Comment[]>();
     for (const comment of this.comments) {
-      if (!groups[comment.author]) {
-        groups[comment.author] = [];
+      const snapshot = { ...comment, createdAt: new Date(comment.createdAt.getTime()), updatedAt: new Date(comment.updatedAt.getTime()) };
+      const list = groups.get(comment.author);
+      if (list) {
+        list.push(snapshot);
+      } else {
+        groups.set(comment.author, [snapshot]);
       }
-      groups[comment.author].push(comment);
     }
     return groups;
   }
@@ -948,18 +949,25 @@ export class CommentManager {
    * @returns Number of comments imported
    */
   importFromJson(jsonString: string): number {
-    const data = JSON.parse(jsonString);
+    let data: unknown;
+    try {
+      data = JSON.parse(jsonString);
+    } catch {
+      return 0;
+    }
+    if (!Array.isArray(data)) return 0;
     let imported = 0;
     for (const item of data) {
-      this.comments.push({
-        id: this.nextId++,
-        organizationName: item.organizationName,
-        content: item.content,
-        author: item.author,
-        createdAt: new Date(item.createdAt),
-        updatedAt: new Date()
-      });
-      imported++;
+      try {
+        this.createComment(
+          String(item?.organizationName ?? ''),
+          String(item?.content ?? ''),
+          String(item?.author ?? '')
+        );
+        imported++;
+      } catch {
+        // skip invalid entries
+      }
     }
     return imported;
   }
@@ -972,12 +980,13 @@ export class CommentManager {
    */
   calculateRelevanceScore(commentId: number, searchTerms: string[]): number {
     const comment = this.getCommentById(commentId);
-    if (!comment) return 0;
+    if (!comment || comment.content.length === 0) return 0;
+    const lowerContent = comment.content.toLowerCase();
     let score = 0;
     for (const term of searchTerms) {
-      const regex = new RegExp(term, 'gi');
-      const matches = comment.content.match(regex);
-      score += matches ? matches.length : 0;
+      const cleaned = term.trim().toLowerCase();
+      if (cleaned.length === 0) continue;
+      score += lowerContent.split(cleaned).length - 1;
     }
     return score / comment.content.length;
   }
