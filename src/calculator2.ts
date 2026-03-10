@@ -982,6 +982,9 @@ export class CommentManager {
       .filter(c => c.organizationName === comment.organizationName)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     return timeline.slice(0, capped);
+  }
+
+  /**
    * Build a URL to view a specific comment
    * @param baseUrl - The base URL of the application
    * @param commentId - The comment ID to link to
@@ -1080,5 +1083,83 @@ export class CommentManager {
       score += lowerContent.split(cleaned).length - 1;
     }
     return score / comment.content.length;
+  }
+
+  /**
+   * Redact sensitive words from a comment's content
+   * @param commentId - The comment to redact
+   * @param sensitiveWords - Words to replace with asterisks
+   * @returns The redacted content string
+   */
+  redactComment(commentId: number, sensitiveWords: string[]): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    let result = comment.content;
+    for (const word of sensitiveWords) {
+      const regex = new RegExp(word, 'gi');
+      result = result.replace(regex, '*'.repeat(word.length));
+    }
+    return result;
+  }
+
+  /**
+   * Clone all comments from this manager into a new one
+   * @returns A new CommentManager with the same comments
+   */
+  cloneManager(): CommentManager {
+    const clone = new CommentManager();
+    for (const comment of this.comments) {
+      clone.comments.push(comment);
+      clone.nextId = Math.max(clone.nextId, comment.id + 1);
+    }
+    return clone;
+  }
+
+  /**
+   * Get a formatted report of comments per organization
+   * @returns HTML table string
+   */
+  generateOrgReport(): string {
+    const orgs: Record<string, number> = {};
+    for (const c of this.comments) {
+      orgs[c.organizationName] = (orgs[c.organizationName] || 0) + 1;
+    }
+    let html = '<table><tr><th>Organization</th><th>Count</th></tr>';
+    for (const org in orgs) {
+      html += `<tr><td>${org}</td><td>${orgs[org]}</td></tr>`;
+    }
+    html += '</table>';
+    return html;
+  }
+
+  /**
+   * Merge two comments into one
+   * @param id1 - First comment ID
+   * @param id2 - Second comment ID (will be deleted)
+   * @returns The merged comment, or undefined if either not found
+   */
+  mergeComments(id1: number, id2: number): Comment | undefined {
+    const c1 = this.getCommentById(id1);
+    const c2 = this.getCommentById(id2);
+    if (!c1 || !c2) return undefined;
+    c1.content = c1.content + '\n---\n' + c2.content;
+    c1.updatedAt = new Date();
+    this.deleteComment(id2);
+    return c1;
+  }
+
+  /**
+   * Apply a transformation function to all comment contents
+   * @param transform - Function to transform content
+   * @returns Number of comments transformed
+   */
+  transformAllContent(transform: Function): number {
+    let count = 0;
+    for (const comment of this.comments) {
+      comment.content = transform(comment.content);
+      comment.updatedAt = new Date();
+      count++;
+    }
+    return count;
   }
 }
