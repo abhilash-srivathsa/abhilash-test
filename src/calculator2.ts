@@ -982,6 +982,9 @@ export class CommentManager {
       .filter(c => c.organizationName === comment.organizationName)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
     return timeline.slice(0, capped);
+  }
+
+  /**
    * Build a URL to view a specific comment
    * @param baseUrl - The base URL of the application
    * @param commentId - The comment ID to link to
@@ -1080,5 +1083,88 @@ export class CommentManager {
       score += lowerContent.split(cleaned).length - 1;
     }
     return score / comment.content.length;
+  }
+
+  /**
+   * Redact sensitive words from a comment's content
+   * @param commentId - The comment to redact
+   * @param sensitiveWords - Words to replace with asterisks
+   * @returns The redacted content string
+   */
+  redactComment(commentId: number, sensitiveWords: string[]): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    let result = comment.content;
+    for (const word of sensitiveWords) {
+      if (word.length === 0) continue;
+      const mask = '*'.repeat(word.length);
+      const lower = result.toLowerCase();
+      const target = word.toLowerCase();
+      let idx = lower.indexOf(target);
+      while (idx !== -1) {
+        result = result.substring(0, idx) + mask + result.substring(idx + word.length);
+        idx = result.toLowerCase().indexOf(target, idx + mask.length);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Clone all comments from this manager into a new one
+   * @returns A new CommentManager with the same comments
+   */
+  cloneManager(): CommentManager {
+    const clone = new CommentManager();
+    const serialized = this.comments.map(c => ({
+      organizationName: c.organizationName,
+      content: c.content,
+      author: c.author,
+      createdAt: c.createdAt.toISOString()
+    }));
+    clone.importFromJson(JSON.stringify(serialized));
+    return clone;
+  }
+
+  /**
+   * Get a report of comment counts per organization
+   * @returns Array of org name and count pairs
+   */
+  generateOrgReport(): { org: string; count: number }[] {
+    const counts = new Map<string, number>();
+    for (const c of this.comments) {
+      counts.set(c.organizationName, (counts.get(c.organizationName) ?? 0) + 1);
+    }
+    return Array.from(counts, ([org, count]) => ({ org, count }));
+  }
+
+  /**
+   * Merge two comments into one
+   * @param id1 - First comment ID
+   * @param id2 - Second comment ID (will be deleted)
+   * @returns The merged comment, or undefined if either not found
+   */
+  mergeComments(id1: number, id2: number): Comment | undefined {
+    const c1 = this.getCommentById(id1);
+    const c2 = this.getCommentById(id2);
+    if (!c1 || !c2 || id1 === id2) return undefined;
+    const merged = c1.content + '\n---\n' + c2.content;
+    this.deleteComment(id1);
+    this.deleteComment(id2);
+    return this.createComment(c1.organizationName, merged, c1.author);
+  }
+
+  /**
+   * Apply a named string transformation to all comment contents
+   * @param method - Name of a string method to apply
+   * @returns Number of comments transformed
+   */
+  transformAllContent(method: 'toUpperCase' | 'toLowerCase' | 'trim'): number {
+    let count = 0;
+    for (const comment of this.comments) {
+      comment.content = comment.content[method]();
+      comment.updatedAt = new Date();
+      count++;
+    }
+    return count;
   }
 }
