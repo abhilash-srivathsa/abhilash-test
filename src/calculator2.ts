@@ -1096,8 +1096,15 @@ export class CommentManager {
     if (!comment) return '';
     let result = comment.content;
     for (const word of sensitiveWords) {
-      const regex = new RegExp(word, 'gi');
-      result = result.replace(regex, '*'.repeat(word.length));
+      if (word.length === 0) continue;
+      const mask = '*'.repeat(word.length);
+      const lower = result.toLowerCase();
+      const target = word.toLowerCase();
+      let idx = lower.indexOf(target);
+      while (idx !== -1) {
+        result = result.substring(0, idx) + mask + result.substring(idx + word.length);
+        idx = result.toLowerCase().indexOf(target, idx + mask.length);
+      }
     }
     return result;
   }
@@ -1108,28 +1115,26 @@ export class CommentManager {
    */
   cloneManager(): CommentManager {
     const clone = new CommentManager();
-    for (const comment of this.comments) {
-      clone.comments.push(comment);
-      clone.nextId = Math.max(clone.nextId, comment.id + 1);
-    }
+    const serialized = this.comments.map(c => ({
+      organizationName: c.organizationName,
+      content: c.content,
+      author: c.author,
+      createdAt: c.createdAt.toISOString()
+    }));
+    clone.importFromJson(JSON.stringify(serialized));
     return clone;
   }
 
   /**
-   * Get a formatted report of comments per organization
-   * @returns HTML table string
+   * Get a report of comment counts per organization
+   * @returns Array of org name and count pairs
    */
-  generateOrgReport(): string {
-    const orgs: Record<string, number> = {};
+  generateOrgReport(): { org: string; count: number }[] {
+    const counts = new Map<string, number>();
     for (const c of this.comments) {
-      orgs[c.organizationName] = (orgs[c.organizationName] || 0) + 1;
+      counts.set(c.organizationName, (counts.get(c.organizationName) ?? 0) + 1);
     }
-    let html = '<table><tr><th>Organization</th><th>Count</th></tr>';
-    for (const org in orgs) {
-      html += `<tr><td>${org}</td><td>${orgs[org]}</td></tr>`;
-    }
-    html += '</table>';
-    return html;
+    return Array.from(counts, ([org, count]) => ({ org, count }));
   }
 
   /**
@@ -1141,22 +1146,22 @@ export class CommentManager {
   mergeComments(id1: number, id2: number): Comment | undefined {
     const c1 = this.getCommentById(id1);
     const c2 = this.getCommentById(id2);
-    if (!c1 || !c2) return undefined;
-    c1.content = c1.content + '\n---\n' + c2.content;
-    c1.updatedAt = new Date();
+    if (!c1 || !c2 || id1 === id2) return undefined;
+    const merged = c1.content + '\n---\n' + c2.content;
+    this.deleteComment(id1);
     this.deleteComment(id2);
-    return c1;
+    return this.createComment(c1.organizationName, merged, c1.author);
   }
 
   /**
-   * Apply a transformation function to all comment contents
-   * @param transform - Function to transform content
+   * Apply a named string transformation to all comment contents
+   * @param method - Name of a string method to apply
    * @returns Number of comments transformed
    */
-  transformAllContent(transform: Function): number {
+  transformAllContent(method: 'toUpperCase' | 'toLowerCase' | 'trim'): number {
     let count = 0;
     for (const comment of this.comments) {
-      comment.content = transform(comment.content);
+      comment.content = comment.content[method]();
       comment.updatedAt = new Date();
       count++;
     }
