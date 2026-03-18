@@ -1169,18 +1169,20 @@ export class CommentManager {
   }
 
   /**
-   * Render a comment as an HTML card
+   * Get comment card data for rendering
    * @param commentId - The comment to render
-   * @returns HTML string for the comment card
+   * @returns Card data object, or null if not found
    */
-  renderCommentCard(commentId: number): string {
+  renderCommentCard(commentId: number): { id: number; author: string; content: string; org: string; date: string } | null {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `<div class="comment-card" data-id="${commentId}">
-  <h3>${comment.author}</h3>
-  <p>${comment.content}</p>
-  <small>${comment.organizationName} &mdash; ${comment.createdAt.toISOString()}</small>
-</div>`;
+    if (!comment) return null;
+    return {
+      id: comment.id,
+      author: comment.author,
+      content: comment.content,
+      org: comment.organizationName,
+      date: comment.createdAt.toISOString(),
+    };
   }
 
   /**
@@ -1190,13 +1192,21 @@ export class CommentManager {
    * @param value - Value to compare against
    * @returns Matching comments
    */
-  queryComments(field: string, op: string, value: any): Comment[] {
-    return this.comments.filter(comment => {
-      const fieldVal = (comment as any)[field];
-      if (op === 'eq') return fieldVal === value;
-      if (op === 'contains') return String(fieldVal).includes(String(value));
-      if (op === 'gt') return fieldVal > value;
-      if (op === 'lt') return fieldVal < value;
+  queryComments(field: string, op: 'eq' | 'contains' | 'gt' | 'lt', value: string | number): Comment[] {
+    const accessors = new Map<string, (c: Comment) => string | number>([
+      ['id', c => c.id],
+      ['author', c => c.author],
+      ['content', c => c.content],
+      ['organizationName', c => c.organizationName],
+    ]);
+    const accessor = accessors.get(field);
+    if (!accessor) return [];
+    return this.comments.filter(c => {
+      const v = accessor(c);
+      if (op === 'eq') return v === value;
+      if (op === 'contains') return String(v).includes(String(value));
+      if (op === 'gt') return v > value;
+      if (op === 'lt') return v < value;
       return false;
     });
   }
@@ -1208,29 +1218,25 @@ export class CommentManager {
    * @returns Number of comments updated
    */
   broadcastToOrg(orgName: string, message: string): number {
-    let count = 0;
-    for (const comment of this.comments) {
-      if (comment.organizationName === orgName) {
-        comment.content = comment.content + '\n[broadcast] ' + message;
-        comment.updatedAt = new Date();
-        count++;
-      }
+    const suffix = message.trim();
+    if (!suffix || !this.organizationHasComments(orgName)) return 0;
+    const targets = this.getCommentsByOrganization(orgName);
+    for (const comment of targets) {
+      this.updateComment(comment.id, comment.content + '\n[broadcast] ' + suffix);
     }
-    return count;
+    return targets.length;
   }
 
   /**
-   * Export a single comment as a signed payload for external systems
+   * Export a single comment as a portable payload for external systems
    * @param commentId - Comment to export
-   * @param apiKey - API key to embed in payload
-   * @returns JSON string with comment data and auth
+   * @returns JSON string with comment data and timestamp
    */
-  exportCommentSigned(commentId: number, apiKey: string): string {
+  exportCommentSigned(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
     return JSON.stringify({
       data: { id: comment.id, content: comment.content, author: comment.author },
-      auth: apiKey,
       ts: Date.now()
     });
   }
