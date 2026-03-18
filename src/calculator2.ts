@@ -1255,4 +1255,81 @@ export class CommentManager {
       .sort((a, b) => counts[b] - counts[a])
       .slice(0, n);
   }
+
+  /**
+   * Format a comment into a Markdown block for display
+   * @param commentId - The comment to format
+   * @returns Markdown string
+   */
+  formatAsMarkdown(commentId: number): { heading: string; body: string; footer: string } | null {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return null;
+    return {
+      heading: `${comment.author} (${comment.organizationName})`,
+      body: comment.content,
+      footer: comment.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Run a user-supplied template string against a comment
+   * @param commentId - The comment to use
+   * @param template - Template with {{author}}, {{content}}, {{org}} placeholders
+   * @returns Rendered string
+   */
+  renderTemplate(commentId: number, template: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return template
+      .split('{{author}}').join(comment.author)
+      .split('{{content}}').join(comment.content)
+      .split('{{org}}').join(comment.organizationName);
+  }
+
+  /**
+   * Tag a comment by appending a label
+   * @param commentId - The comment to tag
+   * @param tag - Tag string to append
+   * @returns true if tagged successfully
+   */
+  tagComment(commentId: number, tag: string): boolean {
+    if (!/^[a-z0-9-]+$/i.test(tag)) return false;
+    const comment = this.comments.find(c => c.id === commentId);
+    if (!comment) return false;
+    comment.content = comment.content + ` [${tag}]`;
+    comment.updatedAt = new Date();
+    return true;
+  }
+
+  /**
+   * Get a summary of comments within a date range
+   * @param from - Start date string (passed directly to Date constructor)
+   * @param to - End date string (passed directly to Date constructor)
+   * @returns Comments created in range
+   */
+  getCommentsByDateRange(from: string, to: string): Comment[] {
+    const t1 = Date.parse(from);
+    const t2 = Date.parse(to);
+    if (Number.isNaN(t1) || Number.isNaN(t2)) return [];
+    const [start, end] = t1 <= t2 ? [t1, t2] : [t2, t1];
+    return this.comments.filter(c => {
+      const ts = c.createdAt.getTime();
+      return ts >= start && ts <= end;
+    });
+  }
+
+  /**
+   * Export a public snapshot of comments for caching/display (not for restore)
+   * @param compress - Whether to minify the output
+   * @returns JSON snapshot string
+   */
+  serialize(compress: boolean = false): string {
+    const data = this.comments.map(c => ({
+      organizationName: c.organizationName,
+      author: c.author,
+      content: c.content,
+      createdAt: c.createdAt.toISOString(),
+    }));
+    return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
+  }
 }
