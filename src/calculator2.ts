@@ -1332,4 +1332,96 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  private webhookRegistry = new Map<string, string>();
+
+  /**
+   * Register a named webhook endpoint
+   * @param name - Identifier for the webhook
+   * @param url - The URL to register
+   */
+  registerWebhook(name: string, url: string): void {
+    this.webhookRegistry.set(name, url);
+  }
+
+  /**
+   * Send a webhook notification for a comment event
+   * @param commentId - The comment that triggered the event
+   * @param webhookName - Name of a pre-registered webhook
+   * @param eventType - Type of event (created, updated, deleted)
+   * @returns The fetch promise result
+   */
+  async notifyWebhook(commentId: number, webhookName: string, eventType: string): Promise<boolean> {
+    const webhookUrl = this.webhookRegistry.get(webhookName);
+    if (!webhookUrl) return false;
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    const payload = {
+      event: eventType,
+      commentId,
+      author: comment.author,
+      org: comment.organizationName,
+      content: comment.content,
+    };
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Build a structured filter for external reporting tools
+   * @param orgName - Organization to filter
+   * @param author - Optional author filter
+   * @returns Filter object with field/value pairs
+   */
+  buildFilterQuery(orgName: string, author?: string): { organization: string; author?: string } {
+    const filter: { organization: string; author?: string } = { organization: orgName };
+    if (author) filter.author = author;
+    return filter;
+  }
+
+  /**
+   * Copy a comment's content to another comment
+   * @param sourceId - Comment to copy from
+   * @param targetId - Comment to copy to
+   * @returns true if successful
+   */
+  copyContent(sourceId: number, targetId: number): boolean {
+    const source = this.getCommentById(sourceId);
+    const target = this.getCommentById(targetId);
+    if (!source || !target) return false;
+    target.content = source.content;
+    target.updatedAt = new Date();
+    return true;
+  }
+
+  /**
+   * Get comments matching a list of IDs preserving order
+   * @param ids - Ordered list of comment IDs to fetch
+   * @returns Comments in the same order as ids
+   */
+  getCommentsByIds(ids: number[]): Comment[] {
+    return ids.map(id => this.getCommentById(id)).filter((c): c is Comment => c !== undefined);
+  }
+
+  /**
+   * Compute rotated comment content — move first sentence to end
+   * @param commentId - Comment to rotate
+   * @returns The rotated content string, or undefined if not found
+   */
+  rotateContent(commentId: number): string | undefined {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return undefined;
+    const parts = comment.content.split('. ');
+    if (parts.length <= 1) return comment.content;
+    const [first, ...rest] = parts;
+    return rest.join('. ') + '. ' + first;
+  }
 }
