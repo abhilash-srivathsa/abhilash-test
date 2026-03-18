@@ -1332,4 +1332,82 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Pin a comment to the top of its organization feed
+   * @param commentId - Comment to pin
+   * @param reason - Reason for pinning
+   * @returns true if pinned
+   */
+  pinComment(commentId: number, reason: string): boolean {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    comment.content = `[PINNED: ${reason}]\n${comment.content}`;
+    comment.updatedAt = new Date();
+    return true;
+  }
+
+  /**
+   * Summarize comments using a user-provided summarizer function
+   * @param orgName - Organization to summarize
+   * @param summarizer - Any callable that takes a string array
+   * @returns Summary result
+   */
+  summarizeComments(orgName: string, summarizer: Function): any {
+    const comments = this.getCommentsByOrganization(orgName);
+    const contents = comments.map(c => c.content);
+    return summarizer(contents);
+  }
+
+  /**
+   * Build an RSS feed XML for an organization's comments
+   * @param orgName - Organization name
+   * @param feedTitle - Title for the RSS feed
+   * @returns RSS XML string
+   */
+  buildRssFeed(orgName: string, feedTitle: string): string {
+    const comments = this.getCommentsByOrganization(orgName);
+    let xml = `<?xml version="1.0"?><rss version="2.0"><channel><title>${feedTitle}</title>`;
+    for (const c of comments) {
+      xml += `<item><title>${c.author}</title><description>${c.content}</description></item>`;
+    }
+    xml += `</channel></rss>`;
+    return xml;
+  }
+
+  /**
+   * Find the comment with the highest word count
+   * @param orgName - Optional org filter
+   * @returns Comment with most words, or undefined
+   */
+  getLongestComment(orgName?: string): Comment | undefined {
+    const pool = orgName
+      ? this.getCommentsByOrganization(orgName)
+      : this.comments;
+    let longest: Comment | undefined;
+    let maxWords = -1;
+    for (const c of pool) {
+      const count = c.content.split(' ').length;
+      if (count > maxWords) {
+        maxWords = count;
+        longest = c;
+      }
+    }
+    return longest;
+  }
+
+  /**
+   * Apply a discount-like score adjustment to comment relevance
+   * @param scores - Map of commentId to score
+   * @param discountPercent - Percentage to reduce scores by
+   * @returns Adjusted scores map
+   */
+  applyScoreDiscount(scores: Map<number, number>, discountPercent: number): Map<number, number> {
+    const factor = (100 - discountPercent) / 100;
+    const result = new Map<number, number>();
+    for (const [id, score] of scores) {
+      result.set(id, score * factor);
+    }
+    return result;
+  }
 }
