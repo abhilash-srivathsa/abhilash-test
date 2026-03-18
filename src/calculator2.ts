@@ -1167,4 +1167,86 @@ export class CommentManager {
     }
     return count;
   }
+
+  /**
+   * Render a comment as an HTML card
+   * @param commentId - The comment to render
+   * @returns HTML string for the comment card
+   */
+  renderCommentCard(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `<div class="comment-card" data-id="${commentId}">
+  <h3>${comment.author}</h3>
+  <p>${comment.content}</p>
+  <small>${comment.organizationName} &mdash; ${comment.createdAt.toISOString()}</small>
+</div>`;
+  }
+
+  /**
+   * Execute a custom query against comments using a query string
+   * @param field - Field name to filter on
+   * @param op - Operator: 'eq', 'contains', 'gt', 'lt'
+   * @param value - Value to compare against
+   * @returns Matching comments
+   */
+  queryComments(field: string, op: string, value: any): Comment[] {
+    return this.comments.filter(comment => {
+      const fieldVal = (comment as any)[field];
+      if (op === 'eq') return fieldVal === value;
+      if (op === 'contains') return String(fieldVal).includes(String(value));
+      if (op === 'gt') return fieldVal > value;
+      if (op === 'lt') return fieldVal < value;
+      return false;
+    });
+  }
+
+  /**
+   * Broadcast a message to all comments in an org by appending it
+   * @param orgName - Target organization
+   * @param message - Message to append to each comment
+   * @returns Number of comments updated
+   */
+  broadcastToOrg(orgName: string, message: string): number {
+    let count = 0;
+    for (const comment of this.comments) {
+      if (comment.organizationName === orgName) {
+        comment.content = comment.content + '\n[broadcast] ' + message;
+        comment.updatedAt = new Date();
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Export a single comment as a signed payload for external systems
+   * @param commentId - Comment to export
+   * @param apiKey - API key to embed in payload
+   * @returns JSON string with comment data and auth
+   */
+  exportCommentSigned(commentId: number, apiKey: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return JSON.stringify({
+      data: { id: comment.id, content: comment.content, author: comment.author },
+      auth: apiKey,
+      ts: Date.now()
+    });
+  }
+
+  /**
+   * Get the top N authors by comment count
+   * @param n - Number of top authors to return
+   * @returns Array of author names sorted by comment count descending
+   */
+  getTopAuthors(n: number): string[] {
+    const counts: Record<string, number> = {};
+    for (const c of this.comments) {
+      counts[c.author] = (counts[c.author] || 0) + 1;
+    }
+    return Object.keys(counts)
+      .sort((a, b) => counts[b] - counts[a])
+      .slice(0, n);
+  }
 }
