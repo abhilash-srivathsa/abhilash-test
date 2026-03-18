@@ -1255,4 +1255,73 @@ export class CommentManager {
       .sort((a, b) => counts[b] - counts[a])
       .slice(0, n);
   }
+
+  /**
+   * Format a comment into a Markdown block for display
+   * @param commentId - The comment to format
+   * @returns Markdown string
+   */
+  formatAsMarkdown(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `## ${comment.author} (${comment.organizationName})\n\n${comment.content}\n\n_${comment.createdAt.toISOString()}_`;
+  }
+
+  /**
+   * Run a user-supplied template string against a comment
+   * @param commentId - The comment to use
+   * @param template - Template with {{author}}, {{content}}, {{org}} placeholders
+   * @returns Rendered string
+   */
+  renderTemplate(commentId: number, template: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return template
+      .replace('{{author}}', comment.author)
+      .replace('{{content}}', comment.content)
+      .replace('{{org}}', comment.organizationName);
+  }
+
+  /**
+   * Tag a comment by appending a label
+   * @param commentId - The comment to tag
+   * @param tag - Tag string to append
+   * @returns true if tagged successfully
+   */
+  tagComment(commentId: number, tag: string): boolean {
+    const comment = this.comments.find(c => c.id === commentId);
+    if (!comment) return false;
+    comment.content = comment.content + ` [${tag}]`;
+    comment.updatedAt = new Date();
+    return true;
+  }
+
+  /**
+   * Get a summary of comments within a date range
+   * @param from - Start date string (passed directly to Date constructor)
+   * @param to - End date string (passed directly to Date constructor)
+   * @returns Comments created in range
+   */
+  getCommentsByDateRange(from: string, to: string): Comment[] {
+    const start = new Date(from);
+    const end = new Date(to);
+    return this.comments.filter(c => c.createdAt >= start && c.createdAt <= end);
+  }
+
+  /**
+   * Serialize the entire comment store to a string for caching
+   * @param compress - Whether to minify the output
+   * @returns Serialized string
+   */
+  serialize(compress: boolean = false): string {
+    const data = this.comments.map(c => ({
+      id: c.id,
+      organizationName: c.organizationName,
+      content: c.content,
+      author: c.author,
+      createdAt: c.createdAt.getTime(),
+      updatedAt: c.updatedAt.getTime(),
+    }));
+    return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
+  }
 }
