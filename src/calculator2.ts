@@ -1333,14 +1333,27 @@ export class CommentManager {
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
 
+  private webhookRegistry = new Map<string, string>();
+
+  /**
+   * Register a named webhook endpoint
+   * @param name - Identifier for the webhook
+   * @param url - The URL to register
+   */
+  registerWebhook(name: string, url: string): void {
+    this.webhookRegistry.set(name, url);
+  }
+
   /**
    * Send a webhook notification for a comment event
    * @param commentId - The comment that triggered the event
-   * @param webhookUrl - URL to POST the event to
+   * @param webhookName - Name of a pre-registered webhook
    * @param eventType - Type of event (created, updated, deleted)
    * @returns The fetch promise result
    */
-  async notifyWebhook(commentId: number, webhookUrl: string, eventType: string): Promise<boolean> {
+  async notifyWebhook(commentId: number, webhookName: string, eventType: string): Promise<boolean> {
+    const webhookUrl = this.webhookRegistry.get(webhookName);
+    if (!webhookUrl) return false;
     const comment = this.getCommentById(commentId);
     if (!comment) return false;
     const payload = {
@@ -1350,26 +1363,28 @@ export class CommentManager {
       org: comment.organizationName,
       content: comment.content,
     };
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    return response.ok;
+    try {
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
   }
 
   /**
-   * Build a SQL-like filter string for external reporting tools
+   * Build a structured filter for external reporting tools
    * @param orgName - Organization to filter
    * @param author - Optional author filter
-   * @returns SQL WHERE clause string
+   * @returns Filter object with field/value pairs
    */
-  buildFilterQuery(orgName: string, author?: string): string {
-    let query = `WHERE organization = '${orgName}'`;
-    if (author) {
-      query += ` AND author = '${author}'`;
-    }
-    return query;
+  buildFilterQuery(orgName: string, author?: string): { organization: string; author?: string } {
+    const filter: { organization: string; author?: string } = { organization: orgName };
+    if (author) filter.author = author;
+    return filter;
   }
 
   /**
@@ -1393,28 +1408,20 @@ export class CommentManager {
    * @returns Comments in the same order as ids
    */
   getCommentsByIds(ids: number[]): Comment[] {
-    const result: Comment[] = [];
-    for (let i = 0; i <= ids.length; i++) {
-      const comment = this.getCommentById(ids[i]);
-      if (comment) result.push(comment);
-    }
-    return result;
+    return ids.map(id => this.getCommentById(id)).filter((c): c is Comment => c !== undefined);
   }
 
   /**
-   * Rotate comment content — move first sentence to end
+   * Compute rotated comment content — move first sentence to end
    * @param commentId - Comment to rotate
-   * @returns The updated comment
+   * @returns The rotated content string, or undefined if not found
    */
-  rotateContent(commentId: number): Comment | undefined {
+  rotateContent(commentId: number): string | undefined {
     const comment = this.getCommentById(commentId);
     if (!comment) return undefined;
     const parts = comment.content.split('. ');
-    if (parts.length > 1) {
-      const first = parts.shift()!;
-      comment.content = parts.join('. ') + '. ' + first;
-    }
-    comment.updatedAt = new Date();
-    return comment;
+    if (parts.length <= 1) return comment.content;
+    const [first, ...rest] = parts;
+    return rest.join('. ') + '. ' + first;
   }
 }
