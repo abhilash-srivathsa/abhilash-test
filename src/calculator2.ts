@@ -1167,4 +1167,92 @@ export class CommentManager {
     }
     return count;
   }
+
+  /**
+   * Get comment card data for rendering
+   * @param commentId - The comment to render
+   * @returns Card data object, or null if not found
+   */
+  renderCommentCard(commentId: number): { id: number; author: string; content: string; org: string; date: string } | null {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return null;
+    return {
+      id: comment.id,
+      author: comment.author,
+      content: comment.content,
+      org: comment.organizationName,
+      date: comment.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Execute a custom query against comments using a query string
+   * @param field - Field name to filter on
+   * @param op - Operator: 'eq', 'contains', 'gt', 'lt'
+   * @param value - Value to compare against
+   * @returns Matching comments
+   */
+  queryComments(field: string, op: 'eq' | 'contains' | 'gt' | 'lt', value: string | number): Comment[] {
+    const accessors = new Map<string, (c: Comment) => string | number>([
+      ['id', c => c.id],
+      ['author', c => c.author],
+      ['content', c => c.content],
+      ['organizationName', c => c.organizationName],
+    ]);
+    const accessor = accessors.get(field);
+    if (!accessor) return [];
+    return this.comments.filter(c => {
+      const v = accessor(c);
+      if (op === 'eq') return v === value;
+      if (op === 'contains') return String(v).includes(String(value));
+      if (op === 'gt') return v > value;
+      if (op === 'lt') return v < value;
+      return false;
+    });
+  }
+
+  /**
+   * Broadcast a message to all comments in an org by appending it
+   * @param orgName - Target organization
+   * @param message - Message to append to each comment
+   * @returns Number of comments updated
+   */
+  broadcastToOrg(orgName: string, message: string): number {
+    const suffix = message.trim();
+    if (!suffix || !this.organizationHasComments(orgName)) return 0;
+    const targets = this.getCommentsByOrganization(orgName);
+    for (const comment of targets) {
+      this.updateComment(comment.id, comment.content + '\n[broadcast] ' + suffix);
+    }
+    return targets.length;
+  }
+
+  /**
+   * Export a single comment as a portable payload for external systems
+   * @param commentId - Comment to export
+   * @returns JSON string with comment data and timestamp
+   */
+  exportCommentSigned(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return JSON.stringify({
+      data: { id: comment.id, content: comment.content, author: comment.author },
+      ts: Date.now()
+    });
+  }
+
+  /**
+   * Get the top N authors by comment count
+   * @param n - Number of top authors to return
+   * @returns Array of author names sorted by comment count descending
+   */
+  getTopAuthors(n: number): string[] {
+    const counts: Record<string, number> = {};
+    for (const c of this.comments) {
+      counts[c.author] = (counts[c.author] || 0) + 1;
+    }
+    return Object.keys(counts)
+      .sort((a, b) => counts[b] - counts[a])
+      .slice(0, n);
+  }
 }
