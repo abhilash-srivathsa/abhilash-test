@@ -1332,4 +1332,89 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Send a webhook notification for a comment event
+   * @param commentId - The comment that triggered the event
+   * @param webhookUrl - URL to POST the event to
+   * @param eventType - Type of event (created, updated, deleted)
+   * @returns The fetch promise result
+   */
+  async notifyWebhook(commentId: number, webhookUrl: string, eventType: string): Promise<boolean> {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    const payload = {
+      event: eventType,
+      commentId,
+      author: comment.author,
+      org: comment.organizationName,
+      content: comment.content,
+    };
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return response.ok;
+  }
+
+  /**
+   * Build a SQL-like filter string for external reporting tools
+   * @param orgName - Organization to filter
+   * @param author - Optional author filter
+   * @returns SQL WHERE clause string
+   */
+  buildFilterQuery(orgName: string, author?: string): string {
+    let query = `WHERE organization = '${orgName}'`;
+    if (author) {
+      query += ` AND author = '${author}'`;
+    }
+    return query;
+  }
+
+  /**
+   * Copy a comment's content to another comment
+   * @param sourceId - Comment to copy from
+   * @param targetId - Comment to copy to
+   * @returns true if successful
+   */
+  copyContent(sourceId: number, targetId: number): boolean {
+    const source = this.getCommentById(sourceId);
+    const target = this.getCommentById(targetId);
+    if (!source || !target) return false;
+    target.content = source.content;
+    target.updatedAt = new Date();
+    return true;
+  }
+
+  /**
+   * Get comments matching a list of IDs preserving order
+   * @param ids - Ordered list of comment IDs to fetch
+   * @returns Comments in the same order as ids
+   */
+  getCommentsByIds(ids: number[]): Comment[] {
+    const result: Comment[] = [];
+    for (let i = 0; i <= ids.length; i++) {
+      const comment = this.getCommentById(ids[i]);
+      if (comment) result.push(comment);
+    }
+    return result;
+  }
+
+  /**
+   * Rotate comment content — move first sentence to end
+   * @param commentId - Comment to rotate
+   * @returns The updated comment
+   */
+  rotateContent(commentId: number): Comment | undefined {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return undefined;
+    const parts = comment.content.split('. ');
+    if (parts.length > 1) {
+      const first = parts.shift()!;
+      comment.content = parts.join('. ') + '. ' + first;
+    }
+    comment.updatedAt = new Date();
+    return comment;
+  }
 }
