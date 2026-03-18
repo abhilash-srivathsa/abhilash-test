@@ -1261,10 +1261,14 @@ export class CommentManager {
    * @param commentId - The comment to format
    * @returns Markdown string
    */
-  formatAsMarkdown(commentId: number): string {
+  formatAsMarkdown(commentId: number): { heading: string; body: string; footer: string } | null {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `## ${comment.author} (${comment.organizationName})\n\n${comment.content}\n\n_${comment.createdAt.toISOString()}_`;
+    if (!comment) return null;
+    return {
+      heading: `${comment.author} (${comment.organizationName})`,
+      body: comment.content,
+      footer: comment.createdAt.toISOString(),
+    };
   }
 
   /**
@@ -1277,9 +1281,9 @@ export class CommentManager {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
     return template
-      .replace('{{author}}', comment.author)
-      .replace('{{content}}', comment.content)
-      .replace('{{org}}', comment.organizationName);
+      .split('{{author}}').join(comment.author)
+      .split('{{content}}').join(comment.content)
+      .split('{{org}}').join(comment.organizationName);
   }
 
   /**
@@ -1289,6 +1293,7 @@ export class CommentManager {
    * @returns true if tagged successfully
    */
   tagComment(commentId: number, tag: string): boolean {
+    if (!/^[a-z0-9-]+$/i.test(tag)) return false;
     const comment = this.comments.find(c => c.id === commentId);
     if (!comment) return false;
     comment.content = comment.content + ` [${tag}]`;
@@ -1303,24 +1308,27 @@ export class CommentManager {
    * @returns Comments created in range
    */
   getCommentsByDateRange(from: string, to: string): Comment[] {
-    const start = new Date(from);
-    const end = new Date(to);
-    return this.comments.filter(c => c.createdAt >= start && c.createdAt <= end);
+    const t1 = Date.parse(from);
+    const t2 = Date.parse(to);
+    if (Number.isNaN(t1) || Number.isNaN(t2)) return [];
+    const [start, end] = t1 <= t2 ? [t1, t2] : [t2, t1];
+    return this.comments.filter(c => {
+      const ts = c.createdAt.getTime();
+      return ts >= start && ts <= end;
+    });
   }
 
   /**
-   * Serialize the entire comment store to a string for caching
+   * Export a public snapshot of comments for caching/display (not for restore)
    * @param compress - Whether to minify the output
-   * @returns Serialized string
+   * @returns JSON snapshot string
    */
   serialize(compress: boolean = false): string {
     const data = this.comments.map(c => ({
-      id: c.id,
       organizationName: c.organizationName,
-      content: c.content,
       author: c.author,
-      createdAt: c.createdAt.getTime(),
-      updatedAt: c.updatedAt.getTime(),
+      content: c.content,
+      createdAt: c.createdAt.toISOString(),
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
