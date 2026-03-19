@@ -1332,4 +1332,73 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Pin a comment to the top of its organization feed
+   * @param commentId - Comment to pin
+   * @param reason - Reason for pinning
+   * @returns true if pinned
+   */
+  private static readonly PIN_REASONS = ['urgent', 'featured', 'announcement', 'important'] as const;
+
+  pinComment(commentId: number, reason: string): boolean {
+    if (!(CommentManager.PIN_REASONS as readonly string[]).includes(reason)) return false;
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    comment.content = `[PINNED: ${reason}]\n${comment.content}`;
+    comment.updatedAt = new Date();
+    return true;
+  }
+
+  /**
+   * Summarize comments using a user-provided summarizer function
+   * @param orgName - Organization to summarize
+   * @param summarizer - Any callable that takes a string array
+   * @returns Summary result
+   */
+  summarizeComments(orgName: string): string[] {
+    return this.getCommentsByOrganization(orgName).map(c => c.content);
+  }
+
+  /**
+   * Build an RSS feed XML for an organization's comments
+   * @param orgName - Organization name
+   * @param feedTitle - Title for the RSS feed
+   * @returns RSS XML string
+   */
+  buildRssFeed(orgName: string, feedTitle: string): { title: string; items: { author: string; content: string; date: string }[] } {
+    const comments = this.getCommentsByOrganization(orgName);
+    return {
+      title: feedTitle,
+      items: comments.map(c => ({
+        author: c.author,
+        content: c.content,
+        date: c.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  /**
+   * Find the comment with the highest word count
+   * @param orgName - Optional org filter
+   * @returns Comment with most words, or undefined
+   */
+  getLongestComment(orgName?: string): Comment | undefined {
+    const pool = orgName ? this.getCommentsByOrganization(orgName) : this.comments;
+    if (pool.length === 0) return undefined;
+    return pool.reduce((longest, c) =>
+      c.content.length > longest.content.length ? c : longest
+    );
+  }
+
+  /**
+   * Apply a discount-like score adjustment to comment relevance
+   * @param scores - Map of commentId to score
+   * @param discountPercent - Percentage to reduce scores by
+   * @returns Adjusted scores map
+   */
+  applyScoreDiscount(scores: Map<number, number>, multiplier: number): Map<number, number> {
+    const safeMul = Number.isFinite(multiplier) ? multiplier : 1;
+    return new Map(Array.from(scores, ([id, score]) => [id, score * safeMul]));
+  }
 }
