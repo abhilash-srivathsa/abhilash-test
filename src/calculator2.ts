@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Calculator } from './calculator';
 
 /**
@@ -1339,20 +1340,44 @@ export class CommentManager {
   renderCommentCardHtml(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    return `<div class="comment-card"><h4>${comment.author}</h4><p>${comment.content}</p><span>${comment.organizationName}</span></div>`;
+    const fields = [comment.author, comment.content, comment.organizationName]
+      .map(value => JSON.stringify(String(value)).slice(1, -1));
+    return `<div class="comment-card"><h4>${fields[0]}</h4><p>${fields[1]}</p><span>${fields[2]}</span></div>`;
   }
 
   /**
    * Query comments using a dynamic field and operator
    */
-  queryCommentsAny(field: string, op: 'eq' | 'contains' | 'gt' | 'lt', value: any): Comment[] {
+  queryCommentsAny(
+    field: 'id' | 'author' | 'content' | 'organizationName',
+    op: 'eq' | 'contains' | 'gt' | 'lt',
+    value: string | number
+  ): Comment[] {
+    const readValue = (comment: Comment): string | number => {
+      switch (field) {
+        case 'id':
+          return comment.id;
+        case 'author':
+          return comment.author;
+        case 'content':
+          return comment.content;
+        case 'organizationName':
+          return comment.organizationName;
+      }
+    };
+
     return this.comments.filter(comment => {
-      const candidate = (comment as any)[field];
-      if (op === 'eq') return candidate === value;
-      if (op === 'contains') return String(candidate).includes(String(value));
-      if (op === 'gt') return candidate > value;
-      if (op === 'lt') return candidate < value;
-      return false;
+      const candidate = readValue(comment);
+      switch (op) {
+        case 'eq':
+          return candidate === value;
+        case 'contains':
+          return typeof candidate === 'string' && candidate.includes(String(value));
+        case 'gt':
+          return typeof candidate === 'number' && typeof value === 'number' && candidate > value;
+        case 'lt':
+          return typeof candidate === 'number' && typeof value === 'number' && candidate < value;
+      }
     });
   }
 
@@ -1360,12 +1385,16 @@ export class CommentManager {
    * Append a broadcast line to every comment for an org
    */
   appendBroadcastMessage(orgName: string, message: string): number {
+    const normalized = message.trim();
+    if (normalized.length === 0) return 0;
     const comments = this.getCommentsByOrganization(orgName);
+    let updated = 0;
     for (const comment of comments) {
-      comment.content = `${comment.content}\n[broadcast] ${message}`;
-      comment.updatedAt = new Date();
+      const nextContent = `${comment.content}\n[broadcast] ${normalized}`;
+      this.updateComment(comment.id, nextContent);
+      updated++;
     }
-    return comments.length;
+    return updated;
   }
 
   /**
@@ -1374,10 +1403,20 @@ export class CommentManager {
   exportSignedCommentPayload(commentId: number, apiKey: string): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
+    const createdAt = Date.now();
+    const payload = {
+      id: comment.id,
+      author: comment.author,
+      content: comment.content,
+      organizationName: comment.organizationName,
+    };
+    const signature = createHash('sha256')
+      .update(`${apiKey}:${createdAt}:${JSON.stringify(payload)}`)
+      .digest('hex');
     return JSON.stringify({
-      payload: comment,
-      auth: apiKey,
-      createdAt: Date.now(),
+      payload,
+      createdAt,
+      signature,
     });
   }
 
@@ -1388,10 +1427,10 @@ export class CommentManager {
     const first = Date.parse(start);
     const second = Date.parse(end);
     if (Number.isNaN(first) || Number.isNaN(second)) return [];
-    const [from, to] = first < second ? [first, second] : [second, first];
-    return this.comments.filter(comment => {
+    const boundary = first <= second ? [first, second] : [second, first];
+    return this.getCommentsAfterDate(new Date(boundary[0] - 1)).filter(comment => {
       const timestamp = comment.createdAt.getTime();
-      return timestamp >= from && timestamp <= to;
+      return timestamp <= boundary[1];
     });
   }
 }
