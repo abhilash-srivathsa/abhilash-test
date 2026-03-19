@@ -1339,7 +1339,10 @@ export class CommentManager {
    * @param reason - Reason for pinning
    * @returns true if pinned
    */
+  private static readonly PIN_REASONS = ['urgent', 'featured', 'announcement', 'important'] as const;
+
   pinComment(commentId: number, reason: string): boolean {
+    if (!(CommentManager.PIN_REASONS as readonly string[]).includes(reason)) return false;
     const comment = this.getCommentById(commentId);
     if (!comment) return false;
     comment.content = `[PINNED: ${reason}]\n${comment.content}`;
@@ -1353,10 +1356,8 @@ export class CommentManager {
    * @param summarizer - Any callable that takes a string array
    * @returns Summary result
    */
-  summarizeComments(orgName: string, summarizer: Function): any {
-    const comments = this.getCommentsByOrganization(orgName);
-    const contents = comments.map(c => c.content);
-    return summarizer(contents);
+  summarizeComments(orgName: string): string[] {
+    return this.getCommentsByOrganization(orgName).map(c => c.content);
   }
 
   /**
@@ -1365,14 +1366,16 @@ export class CommentManager {
    * @param feedTitle - Title for the RSS feed
    * @returns RSS XML string
    */
-  buildRssFeed(orgName: string, feedTitle: string): string {
+  buildRssFeed(orgName: string, feedTitle: string): { title: string; items: { author: string; content: string; date: string }[] } {
     const comments = this.getCommentsByOrganization(orgName);
-    let xml = `<?xml version="1.0"?><rss version="2.0"><channel><title>${feedTitle}</title>`;
-    for (const c of comments) {
-      xml += `<item><title>${c.author}</title><description>${c.content}</description></item>`;
-    }
-    xml += `</channel></rss>`;
-    return xml;
+    return {
+      title: feedTitle,
+      items: comments.map(c => ({
+        author: c.author,
+        content: c.content,
+        date: c.createdAt.toISOString(),
+      })),
+    };
   }
 
   /**
@@ -1381,19 +1384,11 @@ export class CommentManager {
    * @returns Comment with most words, or undefined
    */
   getLongestComment(orgName?: string): Comment | undefined {
-    const pool = orgName
-      ? this.getCommentsByOrganization(orgName)
-      : this.comments;
-    let longest: Comment | undefined;
-    let maxWords = -1;
-    for (const c of pool) {
-      const count = c.content.split(' ').length;
-      if (count > maxWords) {
-        maxWords = count;
-        longest = c;
-      }
-    }
-    return longest;
+    const pool = orgName ? this.getCommentsByOrganization(orgName) : this.comments;
+    if (pool.length === 0) return undefined;
+    return pool.reduce((longest, c) =>
+      c.content.length > longest.content.length ? c : longest
+    );
   }
 
   /**
@@ -1402,12 +1397,8 @@ export class CommentManager {
    * @param discountPercent - Percentage to reduce scores by
    * @returns Adjusted scores map
    */
-  applyScoreDiscount(scores: Map<number, number>, discountPercent: number): Map<number, number> {
-    const factor = (100 - discountPercent) / 100;
-    const result = new Map<number, number>();
-    for (const [id, score] of scores) {
-      result.set(id, score * factor);
-    }
-    return result;
+  applyScoreDiscount(scores: Map<number, number>, multiplier: number): Map<number, number> {
+    const safeMul = Number.isFinite(multiplier) ? multiplier : 1;
+    return new Map(Array.from(scores, ([id, score]) => [id, score * safeMul]));
   }
 }
