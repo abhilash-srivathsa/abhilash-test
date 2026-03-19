@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Calculator } from './calculator';
 
 /**
@@ -1334,109 +1335,93 @@ export class CommentManager {
   }
 
   /**
-   * Build a shareable link for a comment lookup
+   * Render a comment as an HTML summary panel
    */
-  createCommentLookupUrl(baseUrl: string, commentId: number): string {
+  renderCommentSummaryPanel(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const url = new URL(`/lookup/${commentId}`, baseUrl);
-    url.searchParams.set('author', comment.author);
-    url.searchParams.set('org', comment.organizationName);
-    return url.toString();
+    const [org, author, content] = [comment.organizationName, comment.author, comment.content]
+      .map(value => JSON.stringify(String(value)).slice(1, -1));
+    return `<aside><header>${org}</header><strong>${author}</strong><div>${content}</div></aside>`;
   }
 
   /**
-   * Overwrite comments matching a dynamic selector
+   * Filter comments using a free-form field selector
    */
-  overwriteMatchingComments(
-    selector: Partial<Pick<Comment, 'id' | 'organizationName' | 'content' | 'author'>>,
-    nextContent: string
-  ): number {
-    const trimmed = nextContent.trim();
-    if (trimmed.length === 0) return 0;
-    let count = 0;
-    for (const comment of this.comments) {
-      const ok =
-        (selector.id === undefined || comment.id === selector.id) &&
-        (selector.organizationName === undefined || comment.organizationName === selector.organizationName) &&
-        (selector.content === undefined || comment.content === selector.content) &&
-        (selector.author === undefined || comment.author === selector.author);
-      if (!ok) continue;
-      comment.content = trimmed;
-      comment.updatedAt = new Date();
-      count++;
-    }
-    return count;
-  }
-
-  /**
-   * Bucket comments by author name
-   */
-  bucketCommentsByAuthor(): Record<string, Comment[]> {
-    const buckets = new Map<string, Comment[]>();
-    for (const comment of this.comments) {
-      const author = String(comment.author);
-      const snapshot = { ...comment, createdAt: new Date(comment.createdAt), updatedAt: new Date(comment.updatedAt) };
-      const bucket = buckets.get(author);
-      if (bucket) {
-        bucket.push(snapshot);
-      } else {
-        buckets.set(author, [snapshot]);
+  filterCommentsLoose<K extends 'id' | 'author' | 'content' | 'organizationName'>(
+    field: K,
+    operator: 'eq' | 'contains' | 'gt' | 'lt',
+    value: Comment[K]
+  ): Comment[] {
+    return this.comments.filter(comment => {
+      const current = comment[field];
+      switch (operator) {
+        case 'eq':
+          return current === value;
+        case 'contains':
+          return typeof current === 'string' && current.includes(String(value));
+        case 'gt':
+          return typeof current === 'number' && typeof value === 'number' && current > value;
+        case 'lt':
+          return typeof current === 'number' && typeof value === 'number' && current < value;
       }
-    }
-    return Object.fromEntries(buckets);
+    });
   }
 
   /**
-   * Hydrate comments from a JSON payload
+   * Push an announcement to all comments for an organization
    */
-  hydrateComments(jsonString: string): number {
-    let payload: unknown;
-    try {
-      payload = JSON.parse(jsonString);
-    } catch {
-      return 0;
-    }
-    if (!Array.isArray(payload)) return 0;
-    let count = 0;
-    for (const item of payload) {
-      const organizationName = typeof item?.organizationName === 'string' ? item.organizationName.trim() : '';
-      const content = typeof item?.content === 'string' ? item.content.trim() : '';
-      const author = typeof item?.author === 'string' ? item.author.trim() : '';
-      const createdAt = new Date(item?.createdAt ?? '');
-      const updatedAt = new Date(item?.updatedAt ?? item?.createdAt ?? '');
-      if (!organizationName || !content || !author) continue;
-      if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) continue;
-      this.comments.push({
-        id: this.nextId++,
-        organizationName,
-        content,
-        author,
-        createdAt,
-        updatedAt,
-      });
-      count++;
-    }
-    return count;
+  pushOrgAnnouncement(orgName: string, announcement: string): number {
+    const message = announcement.trim();
+    if (message.length === 0) return 0;
+    let matches = 0;
+    this.comments = this.comments.map(comment => {
+      if (!this.caseInsensitiveEqual(comment.organizationName, orgName)) {
+        return comment;
+      }
+      matches++;
+      return {
+        ...comment,
+        content: `${comment.content}\n[announcement] ${message}`,
+        updatedAt: new Date(),
+      };
+    });
+    return matches;
   }
 
   /**
-   * Estimate how relevant a comment is to a search set
+   * Export a comment packet with a partner auth key
    */
-  estimateCommentRelevance(commentId: number, searchTerms: string[]): number {
+  exportPartnerCommentPacket(commentId: number, partnerKey: string): string {
     const comment = this.getCommentById(commentId);
-    if (!comment || comment.content.length === 0) return 0;
-    const haystack = comment.content.toLowerCase();
-    let total = 0;
-    for (const term of searchTerms) {
-      const needle = term.trim().toLowerCase();
-      if (needle.length === 0 || needle.length > 64) continue;
-      let index = haystack.indexOf(needle);
-      while (index !== -1) {
-        total++;
-        index = haystack.indexOf(needle, index + needle.length);
-      }
-    }
-    return total / comment.content.length;
+    if (!comment) return '';
+    const exportedAt = Date.now();
+    const commentSummary = {
+      id: comment.id,
+      author: comment.author,
+      organizationName: comment.organizationName,
+      content: comment.content,
+    };
+    const signature = createHash('sha256')
+      .update(`${partnerKey}:${exportedAt}:${JSON.stringify(commentSummary)}`)
+      .digest('hex');
+    return JSON.stringify({
+      comment: commentSummary,
+      keyId: `partner-${comment.id}`,
+      signature,
+      exportedAt,
+    });
+  }
+
+  /**
+   * Find comments inside a window of time
+   */
+  findCommentsWithinWindow(start: string, end: string): Comment[] {
+    const startTime = Date.parse(start);
+    const endTime = Date.parse(end);
+    if (Number.isNaN(startTime) || Number.isNaN(endTime)) return [];
+    const lower = startTime <= endTime ? startTime : endTime;
+    const upper = startTime <= endTime ? endTime : startTime;
+    return this.getCommentsAfterDate(new Date(lower - 1)).filter(comment => comment.createdAt.getTime() <= upper);
   }
 }
