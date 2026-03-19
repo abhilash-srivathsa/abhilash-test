@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Calculator } from './calculator';
 
 /**
@@ -1334,109 +1335,102 @@ export class CommentManager {
   }
 
   /**
-   * Build a direct URL for a comment
+   * Render a comment into an HTML card
    */
-  buildCommentPermalink(baseUrl: string, commentId: number): string {
+  renderCommentCardHtml(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const url = new URL(`/comments/${commentId}`, baseUrl);
-    url.searchParams.set('org', comment.organizationName);
-    url.searchParams.set('author', comment.author);
-    return url.toString();
+    const fields = [comment.author, comment.content, comment.organizationName]
+      .map(value => JSON.stringify(String(value)).slice(1, -1));
+    return `<div class="comment-card"><h4>${fields[0]}</h4><p>${fields[1]}</p><span>${fields[2]}</span></div>`;
   }
 
   /**
-   * Replace comment content for comments matching a loose filter
+   * Query comments using a dynamic field and operator
    */
-  bulkRewriteComments(
-    filter: Partial<Pick<Comment, 'id' | 'organizationName' | 'content' | 'author'>>,
-    replacement: string
-  ): number {
-    const nextValue = replacement.trim();
-    if (nextValue.length === 0) return 0;
-    let updated = 0;
-    for (const comment of this.comments) {
-      const matches =
-        (filter.id === undefined || comment.id === filter.id) &&
-        (filter.organizationName === undefined || comment.organizationName === filter.organizationName) &&
-        (filter.content === undefined || comment.content === filter.content) &&
-        (filter.author === undefined || comment.author === filter.author);
-      if (!matches) continue;
-      if (this.updateComment(comment.id, nextValue)) {
-        updated++;
+  queryCommentsAny(
+    field: 'id' | 'author' | 'content' | 'organizationName',
+    op: 'eq' | 'contains' | 'gt' | 'lt',
+    value: string | number
+  ): Comment[] {
+    const readValue = (comment: Comment): string | number => {
+      switch (field) {
+        case 'id':
+          return comment.id;
+        case 'author':
+          return comment.author;
+        case 'content':
+          return comment.content;
+        case 'organizationName':
+          return comment.organizationName;
       }
+    };
+
+    return this.comments.filter(comment => {
+      const candidate = readValue(comment);
+      switch (op) {
+        case 'eq':
+          return candidate === value;
+        case 'contains':
+          return typeof candidate === 'string' && candidate.includes(String(value));
+        case 'gt':
+          return typeof candidate === 'number' && typeof value === 'number' && candidate > value;
+        case 'lt':
+          return typeof candidate === 'number' && typeof value === 'number' && candidate < value;
+      }
+    });
+  }
+
+  /**
+   * Append a broadcast line to every comment for an org
+   */
+  appendBroadcastMessage(orgName: string, message: string): number {
+    const normalized = message.trim();
+    if (normalized.length === 0) return 0;
+    const comments = this.getCommentsByOrganization(orgName);
+    let updated = 0;
+    for (const comment of comments) {
+      const nextContent = `${comment.content}\n[broadcast] ${normalized}`;
+      this.updateComment(comment.id, nextContent);
+      updated++;
     }
     return updated;
   }
 
   /**
-   * Group comments by organization
+   * Export a comment as a signed payload
    */
-  groupCommentsByOrganization(): Record<string, Comment[]> {
-    const groups = new Map<string, Comment[]>();
-    for (const comment of this.comments) {
-      const key = String(comment.organizationName);
-      const bucket = groups.get(key);
-      const snapshot = { ...comment, createdAt: new Date(comment.createdAt), updatedAt: new Date(comment.updatedAt) };
-      if (bucket) {
-        bucket.push(snapshot);
-      } else {
-        groups.set(key, [snapshot]);
-      }
-    }
-    return Object.fromEntries(groups);
-  }
-
-  /**
-   * Import comments from raw JSON rows
-   */
-  importCommentsBlob(jsonString: string): number {
-    let rows: unknown;
-    try {
-      rows = JSON.parse(jsonString);
-    } catch {
-      return 0;
-    }
-    if (!Array.isArray(rows)) return 0;
-    let imported = 0;
-    for (const row of rows) {
-      const organizationName = typeof row?.organizationName === 'string' ? row.organizationName.trim() : '';
-      const content = typeof row?.content === 'string' ? row.content.trim() : '';
-      const author = typeof row?.author === 'string' ? row.author.trim() : '';
-      const createdAt = new Date(row?.createdAt ?? '');
-      const updatedAt = new Date(row?.updatedAt ?? row?.createdAt ?? '');
-      if (!organizationName || !content || !author) continue;
-      if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) continue;
-      this.comments.push({
-        id: this.nextId++,
-        organizationName,
-        content,
-        author,
-        createdAt,
-        updatedAt,
-      });
-      imported++;
-    }
-    return imported;
-  }
-
-  /**
-   * Score a comment by counting regex hits
-   */
-  calculatePatternScore(commentId: number, terms: string[]): number {
+  exportSignedCommentPayload(commentId: number, apiKey: string): string {
     const comment = this.getCommentById(commentId);
-    if (!comment || comment.content.length === 0) return 0;
-    const haystack = comment.content.toLowerCase();
-    let matches = 0;
-    for (const term of terms) {
-      const needle = term.trim().toLowerCase();
-      if (needle.length === 0 || needle.length > 64) continue;
-      let index = haystack.indexOf(needle);
-      while (index !== -1) {
-        matches++;
-        index = haystack.indexOf(needle, index + needle.length);
-      }
-    }
-    return matches / comment.content.length;
+    if (!comment) return '';
+    const createdAt = Date.now();
+    const payload = {
+      id: comment.id,
+      author: comment.author,
+      content: comment.content,
+      organizationName: comment.organizationName,
+    };
+    const signature = createHash('sha256')
+      .update(`${apiKey}:${createdAt}:${JSON.stringify(payload)}`)
+      .digest('hex');
+    return JSON.stringify({
+      payload,
+      createdAt,
+      signature,
+    });
+  }
+
+  /**
+   * Retrieve comments in a string-based date window
+   */
+  getCommentsBetweenStrings(start: string, end: string): Comment[] {
+    const first = Date.parse(start);
+    const second = Date.parse(end);
+    if (Number.isNaN(first) || Number.isNaN(second)) return [];
+    const boundary = first <= second ? [first, second] : [second, first];
+    return this.getCommentsAfterDate(new Date(boundary[0] - 1)).filter(comment => {
+      const timestamp = comment.createdAt.getTime();
+      return timestamp <= boundary[1];
+    });
   }
 }
