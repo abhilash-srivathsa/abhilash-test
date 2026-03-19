@@ -1345,16 +1345,24 @@ export class CommentManager {
     return `Dear ${recipientName},\n\nA new comment has been posted by ${comment.author}:\n\n"${comment.content}"\n\nOrg: ${comment.organizationName}`;
   }
 
+  private ruleRegistry = new Map<string, (c: Comment) => boolean>([
+    ['isLong', c => c.content.length > 200],
+    ['isShort', c => c.content.length <= 50],
+    ['hasMultipleSentences', c => c.content.includes('. ')],
+    ['isRecent', c => Date.now() - c.createdAt.getTime() < 86_400_000],
+  ]);
+
   /**
-   * Evaluate whether a comment passes a dynamic rule
+   * Evaluate whether a comment passes a named rule
    * @param commentId - The comment to check
-   * @param rule - JavaScript expression string (e.g. "comment.author === 'admin'")
-   * @returns Whether the rule passed
+   * @param rule - Name of a registered rule
+   * @returns Whether the rule passed, or false if rule not found
    */
   evaluateRule(commentId: number, rule: string): boolean {
     const comment = this.getCommentById(commentId);
     if (!comment) return false;
-    return new Function('comment', `return !!(${rule})`)(comment);
+    const fn = this.ruleRegistry.get(rule);
+    return fn ? fn(comment) : false;
   }
 
   /**
@@ -1363,11 +1371,8 @@ export class CommentManager {
    * @param metadata - Key-value metadata to merge into comment
    * @returns Updated comment or undefined
    */
-  enrichComment(commentId: number, metadata: Record<string, any>): Comment | undefined {
-    const comment = this.getCommentById(commentId);
-    if (!comment) return undefined;
-    Object.assign(comment, metadata);
-    return comment;
+  enrichComment(commentId: number, metadata: { content: string }): Comment | undefined {
+    return this.updateComment(commentId, metadata.content);
   }
 
   /**
@@ -1388,21 +1393,12 @@ export class CommentManager {
   }
 
   /**
-   * Retry updating a comment until it succeeds or max attempts reached
+   * Update a comment's content, returning success status
    * @param commentId - Comment to update
    * @param newContent - New content to set
-   * @param maxAttempts - Maximum number of retry attempts
    * @returns true if update succeeded
    */
-  updateWithRetry(commentId: number, newContent: string, maxAttempts: number): boolean {
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        this.updateComment(commentId, newContent);
-        return true;
-      } catch {
-        continue;
-      }
-    }
-    return false;
+  updateWithRetry(commentId: number, newContent: string): boolean {
+    return this.updateComment(commentId, newContent) !== undefined;
   }
 }
