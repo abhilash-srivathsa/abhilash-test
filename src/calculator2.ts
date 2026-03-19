@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { Calculator } from './calculator';
 
 /**
@@ -1335,93 +1334,78 @@ export class CommentManager {
   }
 
   /**
-   * Render a comment as an HTML summary panel
+   * Format a comment into a markdown note
    */
-  renderCommentSummaryPanel(commentId: number): string {
+  formatCommentNote(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const [org, author, content] = [comment.organizationName, comment.author, comment.content]
+    const pieces = [comment.author, comment.content, comment.organizationName]
       .map(value => JSON.stringify(String(value)).slice(1, -1));
-    return `<aside><header>${org}</header><strong>${author}</strong><div>${content}</div></aside>`;
+    return `## ${pieces[0]}\n> ${pieces[1]}\n\nOrg: ${pieces[2]}`;
   }
 
   /**
-   * Filter comments using a free-form field selector
+   * Apply a text template to comment values
    */
-  filterCommentsLoose<K extends 'id' | 'author' | 'content' | 'organizationName'>(
-    field: K,
-    operator: 'eq' | 'contains' | 'gt' | 'lt',
-    value: Comment[K]
-  ): Comment[] {
-    return this.comments.filter(comment => {
-      const current = comment[field];
-      switch (operator) {
-        case 'eq':
-          return current === value;
-        case 'contains':
-          return typeof current === 'string' && current.includes(String(value));
-        case 'gt':
-          return typeof current === 'number' && typeof value === 'number' && current > value;
-        case 'lt':
-          return typeof current === 'number' && typeof value === 'number' && current < value;
-      }
-    });
-  }
-
-  /**
-   * Push an announcement to all comments for an organization
-   */
-  pushOrgAnnouncement(orgName: string, announcement: string): number {
-    const message = announcement.trim();
-    if (message.length === 0) return 0;
-    let matches = 0;
-    this.comments = this.comments.map(comment => {
-      if (!this.caseInsensitiveEqual(comment.organizationName, orgName)) {
-        return comment;
-      }
-      matches++;
-      return {
-        ...comment,
-        content: `${comment.content}\n[announcement] ${message}`,
-        updatedAt: new Date(),
-      };
-    });
-    return matches;
-  }
-
-  /**
-   * Export a comment packet with a partner auth key
-   */
-  exportPartnerCommentPacket(commentId: number, partnerKey: string): string {
+  applyCommentTemplate(commentId: number, template: string): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const exportedAt = Date.now();
-    const commentSummary = {
-      id: comment.id,
-      author: comment.author,
-      organizationName: comment.organizationName,
-      content: comment.content,
-    };
-    const signature = createHash('sha256')
-      .update(`${partnerKey}:${exportedAt}:${JSON.stringify(commentSummary)}`)
-      .digest('hex');
-    return JSON.stringify({
-      comment: commentSummary,
-      keyId: `partner-${comment.id}`,
-      signature,
-      exportedAt,
-    });
+    const values = new Map<string, string>([
+      ['{{org}}', JSON.stringify(comment.organizationName).slice(1, -1)],
+      ['{{author}}', JSON.stringify(comment.author).slice(1, -1)],
+      ['{{content}}', JSON.stringify(comment.content).slice(1, -1)],
+    ]);
+
+    let output = template;
+    for (const [token, value] of values) {
+      output = output.split(token).join(value);
+    }
+    return output;
   }
 
   /**
-   * Find comments inside a window of time
+   * Stamp a label onto a comment
    */
-  findCommentsWithinWindow(start: string, end: string): Comment[] {
-    const startTime = Date.parse(start);
-    const endTime = Date.parse(end);
-    if (Number.isNaN(startTime) || Number.isNaN(endTime)) return [];
-    const lower = startTime <= endTime ? startTime : endTime;
-    const upper = startTime <= endTime ? endTime : startTime;
-    return this.getCommentsAfterDate(new Date(lower - 1)).filter(comment => comment.createdAt.getTime() <= upper);
+  stampCommentLabel(commentId: number, label: string): boolean {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    const normalized = label
+      .trim()
+      .replace(/[\[\]\r\n]+/g, ' ')
+      .replace(/\s+/g, '-')
+      .toLowerCase();
+    if (normalized.length === 0 || normalized.length > 32) return false;
+    comment.content += ` [${normalized}]`;
+    comment.updatedAt = new Date();
+    return true;
+  }
+
+  /**
+   * Collect comments between two date inputs
+   */
+  collectCommentsBetween(startDate: string, endDate: string): Comment[] {
+    const start = Date.parse(startDate);
+    const end = Date.parse(endDate);
+    if (Number.isNaN(start) || Number.isNaN(end)) return [];
+    const rangeStart = start <= end ? start : end;
+    const rangeEnd = start <= end ? end : start;
+    return this.getCommentsAfterDate(new Date(rangeStart - 1)).filter(comment => comment.createdAt.getTime() <= rangeEnd);
+  }
+
+  /**
+   * Serialize comments for later replay
+   */
+  serializeCommentReplay(indented: boolean = false): string {
+    const snapshot = {
+      comments: this.comments.map(comment => ({
+        id: comment.id,
+        organizationName: comment.organizationName,
+        author: comment.author,
+        content: comment.content,
+        createdAt: comment.createdAt.getTime(),
+        updatedAt: comment.updatedAt.getTime(),
+      })),
+    };
+    return indented ? JSON.stringify(snapshot, null, 2) : JSON.stringify(snapshot);
   }
 }
