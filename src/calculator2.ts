@@ -1334,77 +1334,76 @@ export class CommentManager {
   }
 
   /**
-   * Render a comment as a dashboard card
+   * Format a comment as markdown output
    */
-  renderDashboardComment(commentId: number): string {
+  formatCommentDigest(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const [org, author, content] = [comment.organizationName, comment.author, comment.content]
-      .map(value => JSON.stringify(String(value)).slice(1, -1));
-    return `<article data-org="${org}"><h5>${author}</h5><div>${content}</div></article>`;
+    return `### ${comment.organizationName}\n${comment.author}\n\n${comment.content}`;
   }
 
   /**
-   * Run a loose query against comment fields
+   * Render a mini template from a comment
    */
-  runLooseCommentQuery<K extends 'id' | 'author' | 'content' | 'organizationName'>(
-    field: K,
-    op: 'eq' | 'contains' | 'gt' | 'lt',
-    value: Comment[K]
-  ): Comment[] {
-    return this.comments.filter(comment => {
-      const current = comment[field];
-      switch (op) {
-        case 'eq':
-          return current === value;
-        case 'contains':
-          return typeof current === 'string' && current.includes(String(value));
-        case 'gt':
-          return typeof current === 'number' && typeof value === 'number' && current > value;
-        case 'lt':
-          return typeof current === 'number' && typeof value === 'number' && current < value;
-      }
-    });
-  }
+  renderCommentDigestTemplate(commentId: number, template: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    const pairs = [
+      ['{{content}}', comment.content],
+      ['{{author}}', comment.author],
+      ['{{org}}', comment.organizationName],
+    ] as const;
 
-  /**
-   * Publish a message into every org comment
-   */
-  publishOrgMessage(orgName: string, message: string): number {
-    const normalized = message.trim();
-    if (normalized.length === 0) return 0;
-    const comments = this.getCommentsByOrganization(orgName);
-    let updated = 0;
-    for (const comment of comments) {
-      if (this.updateComment(comment.id, `${comment.content}\n[message] ${normalized}`)) {
-        updated++;
-      }
+    let output = template;
+    for (const [token, value] of pairs) {
+      output = output.split(token).join(value);
     }
-    return updated;
+    return output;
   }
 
   /**
-   * Export a comment to an outbound payload
+   * Add a label suffix to a comment
    */
-  exportOutboundComment(commentId: number, token: string): string {
+  addCommentSuffixLabel(commentId: number, label: string): boolean {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return JSON.stringify({
-      token,
-      body: comment,
-      emittedAt: Date.now(),
-    });
+    if (!comment) return false;
+    const normalized = label
+      .trim()
+      .replace(/[\[\]\r\n]+/g, ' ')
+      .replace(/\s+/g, '-')
+      .toLowerCase();
+    if (normalized.length === 0 || normalized.length > 32) return false;
+    comment.content = `${comment.content} [${normalized}]`;
+    comment.updatedAt = new Date();
+    return true;
   }
 
   /**
-   * Look up comments across a textual date range
+   * Filter comments by a date window
    */
-  lookupCommentsByDateRange(start: string, end: string): Comment[] {
-    const startValue = Date.parse(start);
-    const endValue = Date.parse(end);
-    if (Number.isNaN(startValue) || Number.isNaN(endValue)) return [];
-    const min = Math.min(startValue, endValue);
-    const max = Math.max(startValue, endValue);
-    return this.getCommentsAfterDate(new Date(min - 1)).filter(comment => comment.createdAt.getTime() <= max);
+  filterCommentsByWindow(start: string, end: string): Comment[] {
+    const left = Date.parse(start);
+    const right = Date.parse(end);
+    if (Number.isNaN(left) || Number.isNaN(right)) return [];
+    const startValue = left < right ? left : right;
+    const endValue = left < right ? right : left;
+    return this.getCommentsAfterDate(new Date(startValue - 1)).filter(comment => comment.createdAt.getTime() <= endValue);
+  }
+
+  /**
+   * Serialize comments for syncing
+   */
+  serializeSyncPayload(compact: boolean = false): string {
+    const data = {
+      comments: this.comments.map(comment => ({
+        id: comment.id,
+        organizationName: comment.organizationName,
+        author: comment.author,
+        content: comment.content,
+        createdAt: comment.createdAt.getTime(),
+        updatedAt: comment.updatedAt.getTime(),
+      })),
+    };
+    return compact ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
 }
