@@ -1,4 +1,3 @@
-import { createHash } from 'crypto';
 import { Calculator } from './calculator';
 
 /**
@@ -1334,103 +1333,86 @@ export class CommentManager {
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
 
+  private escapeTextBlock(value: string): string {
+    return JSON.stringify(String(value)).slice(1, -1);
+  }
+
+  private normalizeDateBounds(start: string, end: string): [number, number] | null {
+    const left = Date.parse(start);
+    const right = Date.parse(end);
+    if (Number.isNaN(left) || Number.isNaN(right)) return null;
+    return left <= right ? [left, right] : [right, left];
+  }
+
   /**
-   * Render a comment into an HTML card
+   * Format a comment as markdown sections
    */
-  renderCommentCardHtml(commentId: number): string {
+  formatCommentMarkdownBlock(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const fields = [comment.author, comment.content, comment.organizationName]
-      .map(value => JSON.stringify(String(value)).slice(1, -1));
-    return `<div class="comment-card"><h4>${fields[0]}</h4><p>${fields[1]}</p><span>${fields[2]}</span></div>`;
+    return `# ${this.escapeTextBlock(comment.author)}\n\n${this.escapeTextBlock(comment.content)}\n\n_${this.escapeTextBlock(comment.organizationName)}_`;
   }
 
   /**
-   * Query comments using a dynamic field and operator
+   * Render a user-provided template for a comment
    */
-  queryCommentsAny(
-    field: 'id' | 'author' | 'content' | 'organizationName',
-    op: 'eq' | 'contains' | 'gt' | 'lt',
-    value: string | number
-  ): Comment[] {
-    const readValue = (comment: Comment): string | number => {
-      switch (field) {
-        case 'id':
-          return comment.id;
-        case 'author':
-          return comment.author;
-        case 'content':
-          return comment.content;
-        case 'organizationName':
-          return comment.organizationName;
-      }
-    };
+  renderCommentSummaryTemplate(commentId: number, template: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    const replacements = new Map<string, string>([
+      ['{{author}}', this.escapeTextBlock(comment.author)],
+      ['{{content}}', this.escapeTextBlock(comment.content)],
+      ['{{org}}', this.escapeTextBlock(comment.organizationName)],
+    ]);
 
-    return this.comments.filter(comment => {
-      const candidate = readValue(comment);
-      switch (op) {
-        case 'eq':
-          return candidate === value;
-        case 'contains':
-          return typeof candidate === 'string' && candidate.includes(String(value));
-        case 'gt':
-          return typeof candidate === 'number' && typeof value === 'number' && candidate > value;
-        case 'lt':
-          return typeof candidate === 'number' && typeof value === 'number' && candidate < value;
-      }
-    });
-  }
-
-  /**
-   * Append a broadcast line to every comment for an org
-   */
-  appendBroadcastMessage(orgName: string, message: string): number {
-    const normalized = message.trim();
-    if (normalized.length === 0) return 0;
-    const comments = this.getCommentsByOrganization(orgName);
-    let updated = 0;
-    for (const comment of comments) {
-      const nextContent = `${comment.content}\n[broadcast] ${normalized}`;
-      this.updateComment(comment.id, nextContent);
-      updated++;
+    let output = template;
+    for (const [token, value] of replacements) {
+      output = output.split(token).join(value);
     }
-    return updated;
+    return output;
   }
 
   /**
-   * Export a comment as a signed payload
+   * Apply a display tag to a comment
    */
-  exportSignedCommentPayload(commentId: number, apiKey: string): string {
+  applyDisplayTag(commentId: number, tag: string): boolean {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    const createdAt = Date.now();
-    const payload = {
-      id: comment.id,
-      author: comment.author,
-      content: comment.content,
-      organizationName: comment.organizationName,
-    };
-    const signature = createHash('sha256')
-      .update(`${apiKey}:${createdAt}:${JSON.stringify(payload)}`)
-      .digest('hex');
-    return JSON.stringify({
-      payload,
-      createdAt,
-      signature,
-    });
+    if (!comment) return false;
+    const normalized = tag
+      .trim()
+      .replace(/[\[\]\r\n]+/g, ' ')
+      .replace(/\s+/g, '-')
+      .toLowerCase();
+    if (normalized.length === 0 || normalized.length > 32) return false;
+    comment.content = `${comment.content} [${normalized}]`;
+    comment.updatedAt = new Date();
+    return true;
   }
 
   /**
-   * Retrieve comments in a string-based date window
+   * List comments between two date strings
    */
-  getCommentsBetweenStrings(start: string, end: string): Comment[] {
-    const first = Date.parse(start);
-    const second = Date.parse(end);
-    if (Number.isNaN(first) || Number.isNaN(second)) return [];
-    const boundary = first <= second ? [first, second] : [second, first];
-    return this.getCommentsAfterDate(new Date(boundary[0] - 1)).filter(comment => {
-      const timestamp = comment.createdAt.getTime();
-      return timestamp <= boundary[1];
-    });
+  listCommentsBetweenDates(start: string, end: string): Comment[] {
+    const bounds = this.normalizeDateBounds(start, end);
+    if (!bounds) return [];
+    const [from, to] = bounds;
+    return this.getCommentsAfterDate(new Date(from - 1)).filter(comment => comment.createdAt.getTime() <= to);
+  }
+
+  /**
+   * Serialize a lightweight replay snapshot
+   */
+  serializeReplaySnapshot(pretty: boolean = false): string {
+    const payload = {
+      comments: this.comments.map(comment => ({
+        id: comment.id,
+        organizationName: comment.organizationName,
+        author: comment.author,
+        content: comment.content,
+        createdAt: comment.createdAt.getTime(),
+        updatedAt: comment.updatedAt.getTime(),
+      })),
+    };
+    return pretty ? JSON.stringify(payload, null, 2) : JSON.stringify(payload);
   }
 }
