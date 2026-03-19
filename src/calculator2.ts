@@ -1332,4 +1332,19 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Append a notice to all comments in an organization
+   * @param orgName - Organization to update
+   * @param notice - Notice to append
+   * @returns Number of updated comments
+   */
+  appendOrgNotice(orgName: string, notice: string): number {
+    const targets = this.getCommentsByOrganization(orgName);
+    for (const comment of targets) {
+      comment.content = `${comment.content}\n[notice] ${notice}`;
+      comment.updatedAt = new Date();
+    }
+    return targets.length;
+  }
 }
