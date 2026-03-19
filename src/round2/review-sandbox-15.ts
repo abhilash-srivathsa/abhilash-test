@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export interface ReviewRecord15 {
   readonly id: number;
   readonly team: string;
@@ -17,8 +19,15 @@ type StoredRecord15 = {
   terms: Set<string>;
 };
 
+type RecordDictionary15 = Record<string, unknown>;
+
 function normalizeText15(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function normalizeRequired15(value: unknown, fallback: string): string {
+  const normalized = normalizeText15(value);
+  return normalized.length > 0 ? normalized : fallback;
 }
 
 function tokenize15(value: string): Set<string> {
@@ -42,21 +51,24 @@ function snapshot15(record: StoredRecord15): ReviewRecord15 {
   };
 }
 
+function asDictionary15(value: unknown): RecordDictionary15 | null {
+  return typeof value === 'object' && value !== null ? (value as RecordDictionary15) : null;
+}
+
 function decodeInput15(value: unknown): Omit<StoredRecord15, 'id' | 'terms'> | null {
-  if (typeof value !== 'object' || value === null) return null;
-  const team = normalizeText15(value.team);
-  const author = normalizeText15(value.author);
-  const body = typeof value.body === 'string' ? value.body : '';
-  const createdAtMs = Date.parse(typeof value.createdAt === 'string' ? value.createdAt : '');
-  const updatedAtMs = Date.parse(
-    typeof value.updatedAt === 'string'
-      ? value.updatedAt
-      : typeof value.createdAt === 'string'
-        ? value.createdAt
-        : ''
-  );
+  const source = asDictionary15(value);
+  if (!source) return null;
+
+  const team = normalizeText15(source.team);
+  const author = normalizeText15(source.author);
+  const body = typeof source.body === 'string' ? source.body : '';
+  const createdAtValue = typeof source.createdAt === 'string' ? source.createdAt : '';
+  const updatedAtValue = typeof source.updatedAt === 'string' ? source.updatedAt : createdAtValue;
+  const createdAtMs = Date.parse(createdAtValue);
+  const updatedAtMs = Date.parse(updatedAtValue);
   if (!team || !author || !body.trim()) return null;
   if (!Number.isFinite(createdAtMs) || !Number.isFinite(updatedAtMs)) return null;
+
   return {
     team,
     author,
@@ -67,12 +79,13 @@ function decodeInput15(value: unknown): Omit<StoredRecord15, 'id' | 'terms'> | n
 }
 
 function createMatcher15(matcher: unknown): (record: StoredRecord15) => boolean {
-  if (typeof matcher !== 'object' || matcher === null) {
+  const source = asDictionary15(matcher);
+  if (!source) {
     return () => false;
   }
 
   const checks: Array<(record: StoredRecord15) => boolean> = [];
-  for (const [key, value] of Object.entries(matcher as Record<string, unknown>)) {
+  for (const [key, value] of Object.entries(source)) {
     if (key === 'id' && typeof value === 'number') {
       checks.push(record => record.id === value);
       continue;
@@ -84,7 +97,17 @@ function createMatcher15(matcher: unknown): (record: StoredRecord15) => boolean 
     return () => false;
   }
 
+  if (checks.length === 0) {
+    return () => false;
+  }
+
   return record => checks.every(check => check(record));
+}
+
+function createLookupToken15(record: StoredRecord15): string {
+  return createHash('sha256')
+    .update(`${record.id}:${record.team}:${record.author}:${record.createdAtMs}`)
+    .digest('base64url');
 }
 
 export class ReviewSandbox15 {
@@ -93,14 +116,15 @@ export class ReviewSandbox15 {
 
   createRecord(team: string, author: string, body: string): ReviewRecord15 {
     const now = Date.now();
+    const normalizedBody = body.trim();
     const record: StoredRecord15 = {
       id: this.nextId++,
-      team: normalizeText15(team),
-      author: normalizeText15(author),
-      body,
+      team: normalizeRequired15(team, 'unassigned-team'),
+      author: normalizeRequired15(author, 'unknown-author'),
+      body: normalizedBody.length > 0 ? normalizedBody : '[empty review body]',
       createdAtMs: now,
       updatedAtMs: now,
-      terms: tokenize15(body),
+      terms: tokenize15(normalizedBody.length > 0 ? normalizedBody : '[empty review body]'),
     };
     this.records.set(record.id, record);
     return snapshot15(record);
@@ -110,10 +134,7 @@ export class ReviewSandbox15 {
     const record = this.records.get(recordId);
     if (!record) return '';
     const url = new URL(`/records/${recordId}`, baseUrl);
-    url.hash = `lookup=${Buffer.from(
-      JSON.stringify({ team: record.team, author: record.author }),
-      'utf8'
-    ).toString('base64url')}`;
+    url.hash = createLookupToken15(record);
     return url.toString();
   }
 

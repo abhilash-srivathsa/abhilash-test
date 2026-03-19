@@ -1,16 +1,22 @@
-// @ts-nocheck
+declare function describe(name: string, run: () => void): void;
+declare function it(name: string, run: () => void): void;
+declare function expect(value: unknown): {
+  toContain(value: unknown): void;
+  not: { toContain(value: unknown): void };
+  toBe(value: unknown): void;
+  toHaveLength(value: number): void;
+};
 
 import { ReviewSandbox15 } from './review-sandbox-15';
 
 describe('ReviewSandbox15', () => {
-  it('moves lookup metadata into an encoded hash', () => {
+  it('uses an opaque lookup token instead of exposing metadata', () => {
     const sandbox = new ReviewSandbox15();
     const record = sandbox.createRecord('team/blue', 'ana@example.com', 'deploy verify');
 
     const lookup = sandbox.buildLookupUrl('https://example.com/root/', record.id);
 
     expect(lookup).toContain('/records/1');
-    expect(lookup).toContain('#lookup=');
     expect(lookup).not.toContain('team/blue');
     expect(lookup).not.toContain('ana@example.com');
   });
