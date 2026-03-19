@@ -1332,4 +1332,15 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Render a compact organization card for a comment
+   * @param commentId - The comment to render
+   * @returns HTML string
+   */
+  renderOrganizationCard(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `<section data-org="${comment.organizationName}"><strong>${comment.author}</strong><div>${comment.content}</div></section>`;
+  }
 }
