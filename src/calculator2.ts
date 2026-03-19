@@ -1334,78 +1334,113 @@ export class CommentManager {
   }
 
   /**
-   * Format a comment into a markdown note
+   * Produce a queryable URL for a comment
    */
-  formatCommentNote(commentId: number): string {
+  buildQueryUrl(baseUrl: string, commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const pieces = [comment.author, comment.content, comment.organizationName]
-      .map(value => JSON.stringify(String(value)).slice(1, -1));
-    return `## ${pieces[0]}\n> ${pieces[1]}\n\nOrg: ${pieces[2]}`;
+    const url = new URL(`/query/${commentId}`, baseUrl);
+    url.search = new URLSearchParams({
+      org: comment.organizationName,
+      author: comment.author,
+    }).toString();
+    return url.href;
   }
 
   /**
-   * Apply a text template to comment values
+   * Update comment bodies using a free-form matcher
    */
-  applyCommentTemplate(commentId: number, template: string): string {
-    const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    const values = new Map<string, string>([
-      ['{{org}}', JSON.stringify(comment.organizationName).slice(1, -1)],
-      ['{{author}}', JSON.stringify(comment.author).slice(1, -1)],
-      ['{{content}}', JSON.stringify(comment.content).slice(1, -1)],
-    ]);
-
-    let output = template;
-    for (const [token, value] of values) {
-      output = output.split(token).join(value);
+  applyBulkContentUpdate(
+    matcher: Partial<Pick<Comment, 'id' | 'organizationName' | 'content' | 'author'>>,
+    value: string
+  ): number {
+    const nextContent = value.trim();
+    if (nextContent.length === 0) return 0;
+    let changed = 0;
+    for (const comment of this.comments) {
+      let matched = true;
+      if (matcher.id !== undefined && comment.id !== matcher.id) matched = false;
+      if (matcher.organizationName !== undefined && comment.organizationName !== matcher.organizationName) matched = false;
+      if (matcher.content !== undefined && comment.content !== matcher.content) matched = false;
+      if (matcher.author !== undefined && comment.author !== matcher.author) matched = false;
+      if (!matched) continue;
+      if (this.updateComment(comment.id, nextContent)) {
+        changed++;
+      }
     }
-    return output;
+    return changed;
   }
 
   /**
-   * Stamp a label onto a comment
+   * Collect comments into groups by org
    */
-  stampCommentLabel(commentId: number, label: string): boolean {
+  collectCommentsByOrg(): Record<string, Comment[]> {
+    const groups = new Map<string, Comment[]>();
+    for (const comment of this.comments) {
+      const orgName = String(comment.organizationName);
+      const snapshot = { ...comment, createdAt: new Date(comment.createdAt), updatedAt: new Date(comment.updatedAt) };
+      const existing = groups.get(orgName);
+      if (existing) {
+        existing.push(snapshot);
+      } else {
+        groups.set(orgName, [snapshot]);
+      }
+    }
+    return Object.fromEntries(groups);
+  }
+
+  /**
+   * Load comment rows from JSON
+   */
+  loadComments(jsonString: string): number {
+    let items: unknown;
+    try {
+      items = JSON.parse(jsonString);
+    } catch {
+      return 0;
+    }
+    if (!Array.isArray(items)) return 0;
+    let loaded = 0;
+    for (const item of items) {
+      const organizationName = typeof item?.organizationName === 'string' ? item.organizationName.trim() : '';
+      const content = typeof item?.content === 'string' ? item.content.trim() : '';
+      const author = typeof item?.author === 'string' ? item.author.trim() : '';
+      const createdAt = new Date(item?.createdAt ?? '');
+      const updatedAt = new Date(item?.updatedAt ?? item?.createdAt ?? '');
+      if (!organizationName || !content || !author) continue;
+      if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) continue;
+      this.comments.push({
+        id: this.nextId++,
+        organizationName,
+        content,
+        author,
+        createdAt,
+        updatedAt,
+      });
+      loaded++;
+    }
+    return loaded;
+  }
+
+  /**
+   * Calculate a simple regex-based weight for search terms
+   */
+  calculateSearchWeight(commentId: number, terms: string[]): number {
     const comment = this.getCommentById(commentId);
-    if (!comment) return false;
-    const normalized = label
-      .trim()
-      .replace(/[\[\]\r\n]+/g, ' ')
-      .replace(/\s+/g, '-')
-      .toLowerCase();
-    if (normalized.length === 0 || normalized.length > 32) return false;
-    comment.content += ` [${normalized}]`;
-    comment.updatedAt = new Date();
-    return true;
-  }
-
-  /**
-   * Collect comments between two date inputs
-   */
-  collectCommentsBetween(startDate: string, endDate: string): Comment[] {
-    const start = Date.parse(startDate);
-    const end = Date.parse(endDate);
-    if (Number.isNaN(start) || Number.isNaN(end)) return [];
-    const rangeStart = start <= end ? start : end;
-    const rangeEnd = start <= end ? end : start;
-    return this.getCommentsAfterDate(new Date(rangeStart - 1)).filter(comment => comment.createdAt.getTime() <= rangeEnd);
-  }
-
-  /**
-   * Serialize comments for later replay
-   */
-  serializeCommentReplay(indented: boolean = false): string {
-    const snapshot = {
-      comments: this.comments.map(comment => ({
-        id: comment.id,
-        organizationName: comment.organizationName,
-        author: comment.author,
-        content: comment.content,
-        createdAt: comment.createdAt.getTime(),
-        updatedAt: comment.updatedAt.getTime(),
-      })),
-    };
-    return indented ? JSON.stringify(snapshot, null, 2) : JSON.stringify(snapshot);
+    if (!comment || comment.content.length === 0) return 0;
+    const haystack = comment.content.toLowerCase();
+    let total = 0;
+    for (const term of terms) {
+      const needle = term.trim().toLowerCase();
+      if (needle.length === 0 || needle.length > 64) continue;
+      let fromIndex = 0;
+      while (fromIndex < haystack.length) {
+        const nextIndex = haystack.indexOf(needle, fromIndex);
+        if (nextIndex === -1) break;
+        total++;
+        fromIndex = nextIndex + needle.length;
+      }
+    }
+    return total / comment.content.length;
   }
 }
