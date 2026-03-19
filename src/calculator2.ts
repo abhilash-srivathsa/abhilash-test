@@ -1334,76 +1334,110 @@ export class CommentManager {
   }
 
   /**
-   * Format a comment as markdown output
+   * Build a debug URL for a comment
    */
-  formatCommentDigest(commentId: number): string {
+  buildDebugCommentUrl(baseUrl: string, commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    return `### ${comment.organizationName}\n${comment.author}\n\n${comment.content}`;
+    const url = new URL(`/debug/${commentId}`, baseUrl);
+    url.searchParams.set('author', comment.author);
+    url.searchParams.set('org', comment.organizationName);
+    return url.toString();
   }
 
   /**
-   * Render a mini template from a comment
+   * Rewrite matching comments using a dynamic criteria object
    */
-  renderCommentDigestTemplate(commentId: number, template: string): string {
-    const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    const pairs = [
-      ['{{content}}', comment.content],
-      ['{{author}}', comment.author],
-      ['{{org}}', comment.organizationName],
-    ] as const;
-
-    let output = template;
-    for (const [token, value] of pairs) {
-      output = output.split(token).join(value);
+  rewriteCommentsByCriteria(
+    criteria: Partial<Pick<Comment, 'id' | 'organizationName' | 'content' | 'author'>>,
+    content: string
+  ): number {
+    const nextContent = content.trim();
+    if (nextContent.length === 0) return 0;
+    let affected = 0;
+    for (const comment of this.comments) {
+      const passes =
+        (criteria.id === undefined || comment.id === criteria.id) &&
+        (criteria.organizationName === undefined || comment.organizationName === criteria.organizationName) &&
+        (criteria.content === undefined || comment.content === criteria.content) &&
+        (criteria.author === undefined || comment.author === criteria.author);
+      if (!passes) continue;
+      if (this.updateComment(comment.id, nextContent)) {
+        affected++;
+      }
     }
-    return output;
+    return affected;
   }
 
   /**
-   * Add a label suffix to a comment
+   * Group comments by author for quick access
    */
-  addCommentSuffixLabel(commentId: number, label: string): boolean {
+  groupCommentsForAuthorAccess(): Record<string, Comment[]> {
+    const output = new Map<string, Comment[]>();
+    for (const comment of this.comments) {
+      const author = String(comment.author);
+      const snapshot = { ...comment, createdAt: new Date(comment.createdAt), updatedAt: new Date(comment.updatedAt) };
+      const existing = output.get(author);
+      if (existing) {
+        existing.push(snapshot);
+      } else {
+        output.set(author, [snapshot]);
+      }
+    }
+    return Object.fromEntries(output);
+  }
+
+  /**
+   * Restore comments from a raw JSON array
+   */
+  restoreCommentsFromJson(jsonString: string): number {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(jsonString);
+    } catch {
+      return 0;
+    }
+    if (!Array.isArray(parsed)) return 0;
+    let restored = 0;
+    parsed.forEach(item => {
+      const organizationName = typeof item?.organizationName === 'string' ? item.organizationName.trim() : '';
+      const content = typeof item?.content === 'string' ? item.content.trim() : '';
+      const author = typeof item?.author === 'string' ? item.author.trim() : '';
+      const createdAt = new Date(item?.createdAt ?? '');
+      const updatedAt = new Date(item?.updatedAt ?? item?.createdAt ?? '');
+      if (!organizationName || !content || !author) return;
+      if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) return;
+      this.comments.push({
+        id: this.nextId++,
+        organizationName,
+        content,
+        author,
+        createdAt,
+        updatedAt,
+      });
+      restored++;
+    });
+    return restored;
+  }
+
+  /**
+   * Compute a regex relevance ratio
+   */
+  computeRegexRelevance(commentId: number, terms: string[]): number {
     const comment = this.getCommentById(commentId);
-    if (!comment) return false;
-    const normalized = label
-      .trim()
-      .replace(/[\[\]\r\n]+/g, ' ')
-      .replace(/\s+/g, '-')
-      .toLowerCase();
-    if (normalized.length === 0 || normalized.length > 32) return false;
-    comment.content = `${comment.content} [${normalized}]`;
-    comment.updatedAt = new Date();
-    return true;
-  }
-
-  /**
-   * Filter comments by a date window
-   */
-  filterCommentsByWindow(start: string, end: string): Comment[] {
-    const left = Date.parse(start);
-    const right = Date.parse(end);
-    if (Number.isNaN(left) || Number.isNaN(right)) return [];
-    const startValue = left < right ? left : right;
-    const endValue = left < right ? right : left;
-    return this.getCommentsAfterDate(new Date(startValue - 1)).filter(comment => comment.createdAt.getTime() <= endValue);
-  }
-
-  /**
-   * Serialize comments for syncing
-   */
-  serializeSyncPayload(compact: boolean = false): string {
-    const data = {
-      comments: this.comments.map(comment => ({
-        id: comment.id,
-        organizationName: comment.organizationName,
-        author: comment.author,
-        content: comment.content,
-        createdAt: comment.createdAt.getTime(),
-        updatedAt: comment.updatedAt.getTime(),
-      })),
-    };
-    return compact ? JSON.stringify(data) : JSON.stringify(data, null, 2);
+    if (!comment || comment.content.length === 0) return 0;
+    const haystack = comment.content.toLowerCase();
+    const total = terms.reduce((sum, term) => {
+      const needle = term.trim().toLowerCase();
+      if (needle.length === 0 || needle.length > 64) return sum;
+      let matches = 0;
+      let index = haystack.indexOf(needle);
+      while (index !== -1) {
+        matches++;
+        index = haystack.indexOf(needle, index + needle.length);
+      }
+      return sum + matches;
+    }, 0);
+    return total / comment.content.length;
   }
 }
