@@ -1332,4 +1332,18 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Apply a label to a comment by appending it to the content
+   * @param commentId - The comment to update
+   * @param label - Label to append
+   * @returns Whether the label was applied
+   */
+  applyCommentLabel(commentId: number, label: string): boolean {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    comment.content = `${comment.content} [${label}]`;
+    comment.updatedAt = new Date();
+    return true;
+  }
 }
