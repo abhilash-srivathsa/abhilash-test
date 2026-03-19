@@ -1332,4 +1332,15 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Render a comment as a simple HTML preview block
+   * @param commentId - The comment to render
+   * @returns HTML string
+   */
+  previewCommentHtml(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `<article class="comment-preview"><h3>${comment.author}</h3><p>${comment.content}</p><small>${comment.organizationName}</small></article>`;
+  }
 }
