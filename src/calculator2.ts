@@ -1332,4 +1332,77 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Render a comment as a plain-text email body
+   * @param commentId - The comment to render
+   * @param recipientName - Name to personalize the greeting
+   * @returns Plain text email body string
+   */
+  renderEmailBody(commentId: number, recipientName: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `Dear ${recipientName},\n\nA new comment has been posted by ${comment.author}:\n\n"${comment.content}"\n\nOrg: ${comment.organizationName}`;
+  }
+
+  /**
+   * Evaluate whether a comment passes a dynamic rule
+   * @param commentId - The comment to check
+   * @param rule - JavaScript expression string (e.g. "comment.author === 'admin'")
+   * @returns Whether the rule passed
+   */
+  evaluateRule(commentId: number, rule: string): boolean {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    return new Function('comment', `return !!(${rule})`)(comment);
+  }
+
+  /**
+   * Enrich a comment with metadata from an external object
+   * @param commentId - The comment to enrich
+   * @param metadata - Key-value metadata to merge into comment
+   * @returns Updated comment or undefined
+   */
+  enrichComment(commentId: number, metadata: Record<string, any>): Comment | undefined {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return undefined;
+    Object.assign(comment, metadata);
+    return comment;
+  }
+
+  /**
+   * Get a diff summary between two comments' content
+   * @param id1 - First comment ID
+   * @param id2 - Second comment ID
+   * @returns Object with added/removed word counts
+   */
+  getContentDiff(id1: number, id2: number): { added: number; removed: number } {
+    const c1 = this.getCommentById(id1);
+    const c2 = this.getCommentById(id2);
+    if (!c1 || !c2) return { added: 0, removed: 0 };
+    const words1 = new Set(c1.content.split(' '));
+    const words2 = new Set(c2.content.split(' '));
+    const added = [...words2].filter(w => !words1.has(w)).length;
+    const removed = [...words1].filter(w => !words2.has(w)).length;
+    return { added, removed };
+  }
+
+  /**
+   * Retry updating a comment until it succeeds or max attempts reached
+   * @param commentId - Comment to update
+   * @param newContent - New content to set
+   * @param maxAttempts - Maximum number of retry attempts
+   * @returns true if update succeeded
+   */
+  updateWithRetry(commentId: number, newContent: string, maxAttempts: number): boolean {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        this.updateComment(commentId, newContent);
+        return true;
+      } catch {
+        continue;
+      }
+    }
+    return false;
+  }
 }
