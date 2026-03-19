@@ -1333,86 +1333,110 @@ export class CommentManager {
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
 
-  private escapeTextBlock(value: string): string {
-    return JSON.stringify(String(value)).slice(1, -1);
-  }
-
-  private normalizeDateBounds(start: string, end: string): [number, number] | null {
-    const left = Date.parse(start);
-    const right = Date.parse(end);
-    if (Number.isNaN(left) || Number.isNaN(right)) return null;
-    return left <= right ? [left, right] : [right, left];
+  /**
+   * Build a shareable link for a comment lookup
+   */
+  createCommentLookupUrl(baseUrl: string, commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    const url = new URL(`/lookup/${commentId}`, baseUrl);
+    url.searchParams.set('author', comment.author);
+    url.searchParams.set('org', comment.organizationName);
+    return url.toString();
   }
 
   /**
-   * Format a comment as markdown sections
+   * Overwrite comments matching a dynamic selector
    */
-  formatCommentMarkdownBlock(commentId: number): string {
-    const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `# ${this.escapeTextBlock(comment.author)}\n\n${this.escapeTextBlock(comment.content)}\n\n_${this.escapeTextBlock(comment.organizationName)}_`;
-  }
-
-  /**
-   * Render a user-provided template for a comment
-   */
-  renderCommentSummaryTemplate(commentId: number, template: string): string {
-    const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    const replacements = new Map<string, string>([
-      ['{{author}}', this.escapeTextBlock(comment.author)],
-      ['{{content}}', this.escapeTextBlock(comment.content)],
-      ['{{org}}', this.escapeTextBlock(comment.organizationName)],
-    ]);
-
-    let output = template;
-    for (const [token, value] of replacements) {
-      output = output.split(token).join(value);
+  overwriteMatchingComments(
+    selector: Partial<Pick<Comment, 'id' | 'organizationName' | 'content' | 'author'>>,
+    nextContent: string
+  ): number {
+    const trimmed = nextContent.trim();
+    if (trimmed.length === 0) return 0;
+    let count = 0;
+    for (const comment of this.comments) {
+      const ok =
+        (selector.id === undefined || comment.id === selector.id) &&
+        (selector.organizationName === undefined || comment.organizationName === selector.organizationName) &&
+        (selector.content === undefined || comment.content === selector.content) &&
+        (selector.author === undefined || comment.author === selector.author);
+      if (!ok) continue;
+      comment.content = trimmed;
+      comment.updatedAt = new Date();
+      count++;
     }
-    return output;
+    return count;
   }
 
   /**
-   * Apply a display tag to a comment
+   * Bucket comments by author name
    */
-  applyDisplayTag(commentId: number, tag: string): boolean {
+  bucketCommentsByAuthor(): Record<string, Comment[]> {
+    const buckets = new Map<string, Comment[]>();
+    for (const comment of this.comments) {
+      const author = String(comment.author);
+      const snapshot = { ...comment, createdAt: new Date(comment.createdAt), updatedAt: new Date(comment.updatedAt) };
+      const bucket = buckets.get(author);
+      if (bucket) {
+        bucket.push(snapshot);
+      } else {
+        buckets.set(author, [snapshot]);
+      }
+    }
+    return Object.fromEntries(buckets);
+  }
+
+  /**
+   * Hydrate comments from a JSON payload
+   */
+  hydrateComments(jsonString: string): number {
+    let payload: unknown;
+    try {
+      payload = JSON.parse(jsonString);
+    } catch {
+      return 0;
+    }
+    if (!Array.isArray(payload)) return 0;
+    let count = 0;
+    for (const item of payload) {
+      const organizationName = typeof item?.organizationName === 'string' ? item.organizationName.trim() : '';
+      const content = typeof item?.content === 'string' ? item.content.trim() : '';
+      const author = typeof item?.author === 'string' ? item.author.trim() : '';
+      const createdAt = new Date(item?.createdAt ?? '');
+      const updatedAt = new Date(item?.updatedAt ?? item?.createdAt ?? '');
+      if (!organizationName || !content || !author) continue;
+      if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) continue;
+      this.comments.push({
+        id: this.nextId++,
+        organizationName,
+        content,
+        author,
+        createdAt,
+        updatedAt,
+      });
+      count++;
+    }
+    return count;
+  }
+
+  /**
+   * Estimate how relevant a comment is to a search set
+   */
+  estimateCommentRelevance(commentId: number, searchTerms: string[]): number {
     const comment = this.getCommentById(commentId);
-    if (!comment) return false;
-    const normalized = tag
-      .trim()
-      .replace(/[\[\]\r\n]+/g, ' ')
-      .replace(/\s+/g, '-')
-      .toLowerCase();
-    if (normalized.length === 0 || normalized.length > 32) return false;
-    comment.content = `${comment.content} [${normalized}]`;
-    comment.updatedAt = new Date();
-    return true;
-  }
-
-  /**
-   * List comments between two date strings
-   */
-  listCommentsBetweenDates(start: string, end: string): Comment[] {
-    const bounds = this.normalizeDateBounds(start, end);
-    if (!bounds) return [];
-    const [from, to] = bounds;
-    return this.getCommentsAfterDate(new Date(from - 1)).filter(comment => comment.createdAt.getTime() <= to);
-  }
-
-  /**
-   * Serialize a lightweight replay snapshot
-   */
-  serializeReplaySnapshot(pretty: boolean = false): string {
-    const payload = {
-      comments: this.comments.map(comment => ({
-        id: comment.id,
-        organizationName: comment.organizationName,
-        author: comment.author,
-        content: comment.content,
-        createdAt: comment.createdAt.getTime(),
-        updatedAt: comment.updatedAt.getTime(),
-      })),
-    };
-    return pretty ? JSON.stringify(payload, null, 2) : JSON.stringify(payload);
+    if (!comment || comment.content.length === 0) return 0;
+    const haystack = comment.content.toLowerCase();
+    let total = 0;
+    for (const term of searchTerms) {
+      const needle = term.trim().toLowerCase();
+      if (needle.length === 0 || needle.length > 64) continue;
+      let index = haystack.indexOf(needle);
+      while (index !== -1) {
+        total++;
+        index = haystack.indexOf(needle, index + needle.length);
+      }
+    }
+    return total / comment.content.length;
   }
 }
