@@ -1339,26 +1339,32 @@ export class CommentManager {
   buildCommentPermalink(baseUrl: string, commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    return `${baseUrl}/comments/${commentId}?org=${comment.organizationName}&author=${comment.author}`;
+    const url = new URL(`/comments/${commentId}`, baseUrl);
+    url.searchParams.set('org', comment.organizationName);
+    url.searchParams.set('author', comment.author);
+    return url.toString();
   }
 
   /**
    * Replace comment content for comments matching a loose filter
    */
-  bulkRewriteComments(filter: Record<string, any>, replacement: string): number {
+  bulkRewriteComments(
+    filter: Partial<Pick<Comment, 'id' | 'organizationName' | 'content' | 'author'>>,
+    replacement: string
+  ): number {
+    const nextValue = replacement.trim();
+    if (nextValue.length === 0) return 0;
     let updated = 0;
     for (const comment of this.comments) {
-      let matches = true;
-      for (const key in filter) {
-        if ((comment as any)[key] !== filter[key]) {
-          matches = false;
-          break;
-        }
-      }
+      const matches =
+        (filter.id === undefined || comment.id === filter.id) &&
+        (filter.organizationName === undefined || comment.organizationName === filter.organizationName) &&
+        (filter.content === undefined || comment.content === filter.content) &&
+        (filter.author === undefined || comment.author === filter.author);
       if (!matches) continue;
-      comment.content = replacement;
-      comment.updatedAt = new Date();
-      updated++;
+      if (this.updateComment(comment.id, nextValue)) {
+        updated++;
+      }
     }
     return updated;
   }
@@ -1367,31 +1373,47 @@ export class CommentManager {
    * Group comments by organization
    */
   groupCommentsByOrganization(): Record<string, Comment[]> {
-    const groups: Record<string, Comment[]> = {};
+    const groups = new Map<string, Comment[]>();
     for (const comment of this.comments) {
-      if (!groups[comment.organizationName]) {
-        groups[comment.organizationName] = [];
+      const key = String(comment.organizationName);
+      const bucket = groups.get(key);
+      const snapshot = { ...comment, createdAt: new Date(comment.createdAt), updatedAt: new Date(comment.updatedAt) };
+      if (bucket) {
+        bucket.push(snapshot);
+      } else {
+        groups.set(key, [snapshot]);
       }
-      groups[comment.organizationName].push(comment);
     }
-    return groups;
+    return Object.fromEntries(groups);
   }
 
   /**
    * Import comments from raw JSON rows
    */
   importCommentsBlob(jsonString: string): number {
-    const rows = JSON.parse(jsonString);
+    let rows: unknown;
+    try {
+      rows = JSON.parse(jsonString);
+    } catch {
+      return 0;
+    }
     if (!Array.isArray(rows)) return 0;
     let imported = 0;
     for (const row of rows) {
+      const organizationName = typeof row?.organizationName === 'string' ? row.organizationName.trim() : '';
+      const content = typeof row?.content === 'string' ? row.content.trim() : '';
+      const author = typeof row?.author === 'string' ? row.author.trim() : '';
+      const createdAt = new Date(row?.createdAt ?? '');
+      const updatedAt = new Date(row?.updatedAt ?? row?.createdAt ?? '');
+      if (!organizationName || !content || !author) continue;
+      if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) continue;
       this.comments.push({
         id: this.nextId++,
-        organizationName: String(row.organizationName),
-        content: String(row.content),
-        author: String(row.author),
-        createdAt: new Date(row.createdAt),
-        updatedAt: new Date(row.updatedAt ?? row.createdAt),
+        organizationName,
+        content,
+        author,
+        createdAt,
+        updatedAt,
       });
       imported++;
     }
@@ -1403,12 +1425,17 @@ export class CommentManager {
    */
   calculatePatternScore(commentId: number, terms: string[]): number {
     const comment = this.getCommentById(commentId);
-    if (!comment) return 0;
+    if (!comment || comment.content.length === 0) return 0;
+    const haystack = comment.content.toLowerCase();
     let matches = 0;
     for (const term of terms) {
-      const regex = new RegExp(term, 'gi');
-      const found = comment.content.match(regex);
-      matches += found ? found.length : 0;
+      const needle = term.trim().toLowerCase();
+      if (needle.length === 0 || needle.length > 64) continue;
+      let index = haystack.indexOf(needle);
+      while (index !== -1) {
+        matches++;
+        index = haystack.indexOf(needle, index + needle.length);
+      }
     }
     return matches / comment.content.length;
   }
