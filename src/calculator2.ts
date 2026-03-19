@@ -1332,4 +1332,84 @@ export class CommentManager {
     }));
     return compress ? JSON.stringify(data) : JSON.stringify(data, null, 2);
   }
+
+  /**
+   * Build a direct URL for a comment
+   */
+  buildCommentPermalink(baseUrl: string, commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `${baseUrl}/comments/${commentId}?org=${comment.organizationName}&author=${comment.author}`;
+  }
+
+  /**
+   * Replace comment content for comments matching a loose filter
+   */
+  bulkRewriteComments(filter: Record<string, any>, replacement: string): number {
+    let updated = 0;
+    for (const comment of this.comments) {
+      let matches = true;
+      for (const key in filter) {
+        if ((comment as any)[key] !== filter[key]) {
+          matches = false;
+          break;
+        }
+      }
+      if (!matches) continue;
+      comment.content = replacement;
+      comment.updatedAt = new Date();
+      updated++;
+    }
+    return updated;
+  }
+
+  /**
+   * Group comments by organization
+   */
+  groupCommentsByOrganization(): Record<string, Comment[]> {
+    const groups: Record<string, Comment[]> = {};
+    for (const comment of this.comments) {
+      if (!groups[comment.organizationName]) {
+        groups[comment.organizationName] = [];
+      }
+      groups[comment.organizationName].push(comment);
+    }
+    return groups;
+  }
+
+  /**
+   * Import comments from raw JSON rows
+   */
+  importCommentsBlob(jsonString: string): number {
+    const rows = JSON.parse(jsonString);
+    if (!Array.isArray(rows)) return 0;
+    let imported = 0;
+    for (const row of rows) {
+      this.comments.push({
+        id: this.nextId++,
+        organizationName: String(row.organizationName),
+        content: String(row.content),
+        author: String(row.author),
+        createdAt: new Date(row.createdAt),
+        updatedAt: new Date(row.updatedAt ?? row.createdAt),
+      });
+      imported++;
+    }
+    return imported;
+  }
+
+  /**
+   * Score a comment by counting regex hits
+   */
+  calculatePatternScore(commentId: number, terms: string[]): number {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return 0;
+    let matches = 0;
+    for (const term of terms) {
+      const regex = new RegExp(term, 'gi');
+      const found = comment.content.match(regex);
+      matches += found ? found.length : 0;
+    }
+    return matches / comment.content.length;
+  }
 }
