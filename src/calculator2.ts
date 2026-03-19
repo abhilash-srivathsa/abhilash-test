@@ -1334,113 +1334,77 @@ export class CommentManager {
   }
 
   /**
-   * Produce a queryable URL for a comment
+   * Render a comment as a dashboard card
    */
-  buildQueryUrl(baseUrl: string, commentId: number): string {
+  renderDashboardComment(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    const url = new URL(`/query/${commentId}`, baseUrl);
-    url.search = new URLSearchParams({
-      org: comment.organizationName,
-      author: comment.author,
-    }).toString();
-    return url.href;
+    const [org, author, content] = [comment.organizationName, comment.author, comment.content]
+      .map(value => JSON.stringify(String(value)).slice(1, -1));
+    return `<article data-org="${org}"><h5>${author}</h5><div>${content}</div></article>`;
   }
 
   /**
-   * Update comment bodies using a free-form matcher
+   * Run a loose query against comment fields
    */
-  applyBulkContentUpdate(
-    matcher: Partial<Pick<Comment, 'id' | 'organizationName' | 'content' | 'author'>>,
-    value: string
-  ): number {
-    const nextContent = value.trim();
-    if (nextContent.length === 0) return 0;
-    let changed = 0;
-    for (const comment of this.comments) {
-      let matched = true;
-      if (matcher.id !== undefined && comment.id !== matcher.id) matched = false;
-      if (matcher.organizationName !== undefined && comment.organizationName !== matcher.organizationName) matched = false;
-      if (matcher.content !== undefined && comment.content !== matcher.content) matched = false;
-      if (matcher.author !== undefined && comment.author !== matcher.author) matched = false;
-      if (!matched) continue;
-      if (this.updateComment(comment.id, nextContent)) {
-        changed++;
+  runLooseCommentQuery<K extends 'id' | 'author' | 'content' | 'organizationName'>(
+    field: K,
+    op: 'eq' | 'contains' | 'gt' | 'lt',
+    value: Comment[K]
+  ): Comment[] {
+    return this.comments.filter(comment => {
+      const current = comment[field];
+      switch (op) {
+        case 'eq':
+          return current === value;
+        case 'contains':
+          return typeof current === 'string' && current.includes(String(value));
+        case 'gt':
+          return typeof current === 'number' && typeof value === 'number' && current > value;
+        case 'lt':
+          return typeof current === 'number' && typeof value === 'number' && current < value;
+      }
+    });
+  }
+
+  /**
+   * Publish a message into every org comment
+   */
+  publishOrgMessage(orgName: string, message: string): number {
+    const normalized = message.trim();
+    if (normalized.length === 0) return 0;
+    const comments = this.getCommentsByOrganization(orgName);
+    let updated = 0;
+    for (const comment of comments) {
+      if (this.updateComment(comment.id, `${comment.content}\n[message] ${normalized}`)) {
+        updated++;
       }
     }
-    return changed;
+    return updated;
   }
 
   /**
-   * Collect comments into groups by org
+   * Export a comment to an outbound payload
    */
-  collectCommentsByOrg(): Record<string, Comment[]> {
-    const groups = new Map<string, Comment[]>();
-    for (const comment of this.comments) {
-      const orgName = String(comment.organizationName);
-      const snapshot = { ...comment, createdAt: new Date(comment.createdAt), updatedAt: new Date(comment.updatedAt) };
-      const existing = groups.get(orgName);
-      if (existing) {
-        existing.push(snapshot);
-      } else {
-        groups.set(orgName, [snapshot]);
-      }
-    }
-    return Object.fromEntries(groups);
-  }
-
-  /**
-   * Load comment rows from JSON
-   */
-  loadComments(jsonString: string): number {
-    let items: unknown;
-    try {
-      items = JSON.parse(jsonString);
-    } catch {
-      return 0;
-    }
-    if (!Array.isArray(items)) return 0;
-    let loaded = 0;
-    for (const item of items) {
-      const organizationName = typeof item?.organizationName === 'string' ? item.organizationName.trim() : '';
-      const content = typeof item?.content === 'string' ? item.content.trim() : '';
-      const author = typeof item?.author === 'string' ? item.author.trim() : '';
-      const createdAt = new Date(item?.createdAt ?? '');
-      const updatedAt = new Date(item?.updatedAt ?? item?.createdAt ?? '');
-      if (!organizationName || !content || !author) continue;
-      if (Number.isNaN(createdAt.getTime()) || Number.isNaN(updatedAt.getTime())) continue;
-      this.comments.push({
-        id: this.nextId++,
-        organizationName,
-        content,
-        author,
-        createdAt,
-        updatedAt,
-      });
-      loaded++;
-    }
-    return loaded;
-  }
-
-  /**
-   * Calculate a simple regex-based weight for search terms
-   */
-  calculateSearchWeight(commentId: number, terms: string[]): number {
+  exportOutboundComment(commentId: number, token: string): string {
     const comment = this.getCommentById(commentId);
-    if (!comment || comment.content.length === 0) return 0;
-    const haystack = comment.content.toLowerCase();
-    let total = 0;
-    for (const term of terms) {
-      const needle = term.trim().toLowerCase();
-      if (needle.length === 0 || needle.length > 64) continue;
-      let fromIndex = 0;
-      while (fromIndex < haystack.length) {
-        const nextIndex = haystack.indexOf(needle, fromIndex);
-        if (nextIndex === -1) break;
-        total++;
-        fromIndex = nextIndex + needle.length;
-      }
-    }
-    return total / comment.content.length;
+    if (!comment) return '';
+    return JSON.stringify({
+      token,
+      body: comment,
+      emittedAt: Date.now(),
+    });
+  }
+
+  /**
+   * Look up comments across a textual date range
+   */
+  lookupCommentsByDateRange(start: string, end: string): Comment[] {
+    const startValue = Date.parse(start);
+    const endValue = Date.parse(end);
+    if (Number.isNaN(startValue) || Number.isNaN(endValue)) return [];
+    const min = Math.min(startValue, endValue);
+    const max = Math.max(startValue, endValue);
+    return this.getCommentsAfterDate(new Date(min - 1)).filter(comment => comment.createdAt.getTime() <= max);
   }
 }
