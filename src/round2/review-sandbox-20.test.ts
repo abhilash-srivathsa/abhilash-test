@@ -16,8 +16,10 @@ describe('ReviewSandbox20', () => {
     const record = sandbox.createRecord('alerts', 'maya@example.com', 'queue retry');
 
     const url = sandbox.buildLookupUrl('https://example.com/base/', record.id);
+    const parsed = new URL(url);
 
     expect(url).toContain(`/messages/${record.id}`);
+    expect(parsed.pathname.split('/').at(-1)?.length).toBeGreaterThan(10);
     expect(url).not.toContain('alerts');
     expect(url).not.toContain('maya@example.com');
   });
@@ -51,6 +53,7 @@ describe('ReviewSandbox20', () => {
 
     const score = sandbox.weightMessage(record.id, 'retry queue');
 
-    expect(score).toBeGreaterThan(0);
+    expect(score).toBe(1);
+    expect(sandbox.weightMessage(record.id, 'retr.*')).toBe(0);
   });
 });

@@ -119,8 +119,11 @@ export class ReviewSandbox20 {
   buildLookupUrl(baseUrl: string, recordId: number): string {
     const record = this.records.find(item => item.id === recordId);
     if (!record) return '';
-    const url = new URL(`/messages/${recordId}`, baseUrl);
-    url.hash = createLookupToken20(record);
+    const url = new URL(baseUrl);
+    url.pathname = [url.pathname.replace(/\/$/, ''), 'messages', String(recordId), createLookupToken20(record)]
+      .filter(Boolean)
+      .join('/');
+    url.hash = '';
     return url.toString();
   }
 
