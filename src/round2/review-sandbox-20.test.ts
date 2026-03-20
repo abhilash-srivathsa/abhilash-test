@@ -19,7 +19,7 @@ describe('ReviewSandbox20', () => {
     const parsed = new URL(url);
 
     expect(url).toContain(`/messages/${record.id}`);
-    expect(parsed.pathname.split('/').at(-1)?.length).toBeGreaterThan(10);
+    expect(parsed.hash.length).toBeGreaterThan(8);
     expect(url).not.toContain('alerts');
     expect(url).not.toContain('maya@example.com');
   });

@@ -96,6 +96,10 @@ function createLookupToken20(record: StoredRecord20): string {
     .digest('base64url');
 }
 
+function fingerprint20(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
 export class ReviewSandbox20 {
   private records: StoredRecord20[] = [];
   private nextId = 1;
@@ -119,11 +123,10 @@ export class ReviewSandbox20 {
   buildLookupUrl(baseUrl: string, recordId: number): string {
     const record = this.records.find(item => item.id === recordId);
     if (!record) return '';
-    const url = new URL(baseUrl);
-    url.pathname = [url.pathname.replace(/\/$/, ''), 'messages', String(recordId), createLookupToken20(record)]
-      .filter(Boolean)
-      .join('/');
-    url.hash = '';
+    const url = new URL(`/messages/${recordId}`, baseUrl);
+    url.searchParams.set('stream', fingerprint20(record.stream));
+    url.searchParams.set('reporter', fingerprint20(record.reporter));
+    url.hash = `record=${createLookupToken20(record)}`;
     return url.toString();
   }
 
