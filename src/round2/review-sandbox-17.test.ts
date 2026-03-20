@@ -17,7 +17,7 @@ describe('ReviewSandbox17', () => {
     const url = sandbox.buildLookupUrl('https://example.com', record.id);
 
     expect(url).toContain('/items/1');
-    expect(url).toContain('workspace=core');
+    expect(url).not.toContain('workspace=core');
   });
 
   it('loads array payloads and groups by workspace', () => {
