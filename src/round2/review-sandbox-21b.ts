@@ -70,3 +70,4 @@ export class ReviewSandbox21B {
     return (matches ? matches.length : 0) / snapshot.payload.length;
   }
 }
+// Round-2 comment-only trigger for reviewer retesting.
