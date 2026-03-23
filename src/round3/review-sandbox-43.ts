@@ -6,6 +6,7 @@ export interface ReviewPulse43 {
   readonly createdAt: Date;
 }
 
+// Comment-only follow-up commit for reviewer retesting.
 type StoredPulse43 = {
   id: number;
   lane: string;
