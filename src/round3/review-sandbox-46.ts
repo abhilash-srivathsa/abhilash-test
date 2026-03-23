@@ -6,6 +6,7 @@ export interface ReviewBundle46 {
   readonly createdAt: Date;
 }
 
+// Comment-only follow-up commit for reviewer retesting.
 type StoredBundle46 = {
   id: number;
   channel: string;
