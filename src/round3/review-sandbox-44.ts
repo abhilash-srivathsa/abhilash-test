@@ -6,6 +6,7 @@ export interface ReviewNote44 {
   readonly createdAt: Date;
 }
 
+// Comment-only follow-up commit for reviewer retesting.
 type StoredNote44 = {
   id: number;
   queue: string;
