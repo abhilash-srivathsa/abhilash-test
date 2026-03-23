@@ -6,6 +6,7 @@ export interface ReviewSnapshot21B {
   createdAt: Date;
 }
 
+// Comment-only follow-up commit for reviewer retesting.
 export class ReviewSandbox21B {
   private snapshots: ReviewSnapshot21B[] = [];
   private nextId = 1;
