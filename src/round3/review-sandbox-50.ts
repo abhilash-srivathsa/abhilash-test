@@ -6,6 +6,7 @@ export interface ReviewSignal50 {
   readonly createdAt: Date;
 }
 
+// Comment-only follow-up commit for reviewer retesting.
 type StoredSignal50 = {
   id: number;
   lane: string;
