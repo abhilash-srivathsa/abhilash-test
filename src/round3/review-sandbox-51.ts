@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+// Comment-only follow-up commit for reviewer retesting.
 export interface ReviewSnapshot51 {
   readonly id: number;
   readonly scope: string;
