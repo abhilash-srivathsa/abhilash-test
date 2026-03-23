@@ -93,3 +93,4 @@ export class ReviewSandbox47 {
     return changed;
   }
 }
+// Round-2 comment-only trigger for reviewer retesting.
