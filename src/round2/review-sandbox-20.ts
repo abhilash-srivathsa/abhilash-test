@@ -15,6 +15,24 @@ function asDictionary20(value: unknown): ReviewRecordInput20 | null {
     : null;
 }
 
+function countLiteralMatches20(message: string, pattern: string): number {
+  if (!message || !pattern) return 0;
+
+  const normalizedMessage = message.toLowerCase();
+  const normalizedPattern = pattern.toLowerCase();
+  let matches = 0;
+  let index = 0;
+
+  while (index < normalizedMessage.length) {
+    const nextIndex = normalizedMessage.indexOf(normalizedPattern, index);
+    if (nextIndex === -1) break;
+    matches++;
+    index = nextIndex + normalizedPattern.length;
+  }
+
+  return matches;
+}
+
 export class ReviewSandbox20 {
   private records: ReviewRecord20[] = [];
   private nextId = 1;
@@ -103,8 +121,9 @@ export class ReviewSandbox20 {
 
   scoreMessage(recordId: number, pattern: string): number {
     const record = this.records.find(item => item.id === recordId);
-    if (!record || !pattern) return 0;
-    const matches = record.message.match(new RegExp(pattern, 'gi'));
-    return (matches ? matches.length : 0) / record.message.length;
+    if (!record || !pattern || record.message.length === 0) return 0;
+
+    const matches = countLiteralMatches20(record.message, pattern);
+    return matches / record.message.length;
   }
 }
