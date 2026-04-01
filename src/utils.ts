@@ -5,10 +5,8 @@ export function formatDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-export function isValidEmail(email: string): boolean {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-}
+/** @deprecated Use {@link validateEmail} from `./utils/validators` instead. */
+export { validateEmail as isValidEmail } from './utils/validators';
 
 export function debounce<T extends (...args: any[]) => any>(
   func: T,
