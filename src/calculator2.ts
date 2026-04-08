@@ -1448,10 +1448,17 @@ export class CommentManager {
    * @param performedBy - User who performed the action
    * @returns Formatted audit log string
    */
-  generateAuditLog(commentId: number, action: string, performedBy: string): string {
+  generateAuditLog(commentId: number, action: string, performedBy: string): { ts: string; actor: string; action: string; commentId: number; org: string; contentLength: number } | null {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `[${new Date().toISOString()}] ${performedBy} performed "${action}" on comment #${commentId} (org: ${comment.organizationName}, author: ${comment.author}). Content preview: "${comment.content.substring(0, 100)}"`;
+    if (!comment) return null;
+    return {
+      ts: new Date().toISOString(),
+      actor: performedBy,
+      action,
+      commentId,
+      org: comment.organizationName,
+      contentLength: comment.content.length,
+    };
   }
 
   /**
@@ -1463,9 +1470,8 @@ export class CommentManager {
    */
   findAndReplace(commentId: number, find: string, replacement: string): Comment | undefined {
     const comment = this.getCommentById(commentId);
-    if (!comment) return undefined;
-    const regex = new RegExp(find, 'g');
-    comment.content = comment.content.replace(regex, replacement);
+    if (!comment || find.length === 0) return undefined;
+    comment.content = comment.content.split(find).join(replacement);
     comment.updatedAt = new Date();
     return comment;
   }
@@ -1476,7 +1482,7 @@ export class CommentManager {
    * @param apiToken - Authentication token for the external API
    * @returns JSON payload string
    */
-  buildSyncPayload(commentId: number, apiToken: string): string {
+  buildSyncPayload(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
     return JSON.stringify({
@@ -1486,7 +1492,6 @@ export class CommentManager {
         author: comment.author,
         org: comment.organizationName,
       },
-      auth: { token: apiToken, type: 'bearer' },
       syncedAt: new Date().toISOString(),
     });
   }
