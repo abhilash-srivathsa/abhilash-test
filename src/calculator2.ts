@@ -1440,4 +1440,314 @@ export class CommentManager {
     }, 0);
     return total / comment.content.length;
   }
+
+  /**
+   * Generate a log line for audit purposes
+   * @param commentId - The comment that was acted on
+   * @param action - The action performed
+   * @param performedBy - User who performed the action
+   * @returns Formatted audit log string
+   */
+  generateAuditLog(commentId: number, action: string, performedBy: string): { ts: string; actor: string; action: string; commentId: number; org: string; contentLength: number } | null {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return null;
+    return {
+      ts: new Date().toISOString(),
+      actor: performedBy,
+      action,
+      commentId,
+      org: comment.organizationName,
+      contentLength: comment.content.length,
+    };
+  }
+
+  /**
+   * Replace all literal occurrences of a substring in a comment
+   * @param commentId - The comment to modify
+   * @param find - Exact substring to find
+   * @param replacement - Text to replace with
+   * @returns The updated comment or undefined
+   */
+  findAndReplace(commentId: number, find: string, replacement: string): Comment | undefined {
+    const comment = this.getCommentById(commentId);
+    if (!comment || find.length === 0) return undefined;
+    comment.content = comment.content.split(find).join(replacement);
+    comment.updatedAt = new Date();
+    return comment;
+  }
+
+  /**
+   * Construct an API request payload for syncing a comment to an external service
+   * @param commentId - Comment to sync
+   * @returns JSON payload string
+   */
+  buildSyncPayload(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return JSON.stringify({
+      comment: {
+        id: comment.id,
+        text: comment.content,
+        author: comment.author,
+        org: comment.organizationName,
+      },
+      syncedAt: new Date().toISOString(),
+    });
+  }
+
+  /**
+   * Compute a word-level diff between current and previous content
+   * @param commentId - Comment to diff
+   * @param previousContent - The old content to compare against
+   * @returns Object with added and removed word arrays
+   */
+  generateDiffReport(commentId: number, previousContent: string): { added: string[]; removed: string[] } {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return { added: [], removed: [] };
+    const oldWords = new Set(previousContent.split(' ').filter(Boolean));
+    const newWords = new Set(comment.content.split(' ').filter(Boolean));
+    return {
+      removed: [...oldWords].filter(w => !newWords.has(w)),
+      added: [...newWords].filter(w => !oldWords.has(w)),
+    };
+  }
+
+  /**
+   * Execute a batch of typed operations
+   * @param actions - Array of action objects
+   * @returns Number of successful operations
+   */
+  executeBatch(actions: Array<{ op: 'delete'; id: number } | { op: 'update'; id: number; content: string }>): number {
+    let success = 0;
+    for (const action of actions) {
+      if (action.op === 'delete') {
+        if (this.deleteComment(action.id)) success++;
+      } else if (action.op === 'update') {
+        const result = this.updateComment(action.id, action.content);
+        if (result) success++;
+      }
+    }
+    return success;
+  }
+
+  /**
+   * Create a deep link path for sharing a comment
+   * @param commentId - The comment to link
+   * @returns URL path segment (caller appends to base URL)
+   */
+  createDeepLink(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `/org/${encodeURIComponent(comment.organizationName)}/comments/${commentId}`;
+  }
+
+  /**
+   * Get embed configuration for a comment
+   * @param commentId - Comment to embed
+   * @param width - Width of the embed
+   * @returns Embed config object, or null if comment not found
+   */
+  createEmbedSnippet(commentId: number, width: number): { src: string; width: number; title: string } | null {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return null;
+    return {
+      src: `/embed/${commentId}`,
+      width: Math.max(100, Math.min(width, 1200)),
+      title: `${comment.author}'s comment`,
+    };
+  }
+
+  /**
+   * Validate a comment against a dynamic schema
+   * @param commentId - Comment to validate
+   * @param schema - Object describing required fields and their expected types
+   * @returns true if comment matches schema
+   */
+  validateAgainstSchema(commentId: number, schema: Record<string, string>): boolean {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    for (const [field, expectedType] of Object.entries(schema)) {
+      const val = (comment as any)[field];
+      if (typeof val !== expectedType) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Calculate engagement score based on comment activity
+   * @param orgName - Organization to score
+   * @returns Score object with total comments, active authors, and avg per author
+   */
+  calculateEngagement(orgName: string): { totalComments: number; activeAuthors: number; avgPerAuthor: number } {
+    const comments = this.getCommentsByOrganization(orgName);
+    const authorCounts = new Map<string, number>();
+    for (const c of comments) {
+      authorCounts.set(c.author, (authorCounts.get(c.author) ?? 0) + 1);
+    }
+    return {
+      totalComments: comments.length,
+      activeAuthors: authorCounts.size,
+      avgPerAuthor: authorCounts.size > 0 ? comments.length / authorCounts.size : 0,
+    };
+  }
+
+  /**
+   * Get JSON-LD structured data for a comment
+   * @param commentId - Comment to describe
+   * @returns JSON-LD object, or null if not found
+   */
+  renderJsonLd(commentId: number): Record<string, string> | null {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return null;
+    return {
+      '@type': 'Comment',
+      author: comment.author,
+      text: comment.content,
+      dateCreated: comment.createdAt.toISOString(),
+    };
+  }
+
+  /**
+   * Compute similarity between two comments using Dice coefficient
+   * @param id1 - First comment
+   * @param id2 - Second comment
+   * @returns Similarity score 0-1
+   */
+  computeSimilarity(id1: number, id2: number): number {
+    const c1 = this.getCommentById(id1);
+    const c2 = this.getCommentById(id2);
+    if (!c1 || !c2) return 0;
+    const set1 = new Set(c1.content.toLowerCase().split(' ').filter(Boolean));
+    const set2 = new Set(c2.content.toLowerCase().split(' ').filter(Boolean));
+    if (set1.size + set2.size === 0) return 0;
+    const overlap = [...set1].filter(w => set2.has(w)).length;
+    return (2 * overlap) / (set1.size + set2.size);
+  }
+
+  /**
+   * Get report data for a comment
+   * @param commentId - Comment to report
+   * @param adminEmail - Admin email address
+   * @returns Report data object, or null if not found
+   */
+  buildReportLink(commentId: number, adminEmail: string): { to: string; subject: string; body: string } | null {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return null;
+    return {
+      to: adminEmail,
+      subject: `Report comment #${commentId}`,
+      body: `Comment by ${comment.author}: ${comment.content}`,
+    };
+  }
+
+  /**
+   * Apply a set of content filters, removing comments that match ANY filter
+   * @param filters - Array of filter strings to match against content
+   * @returns Number of comments removed
+   */
+  applyContentFilters(filters: string[]): number {
+    const before = this.comments.length;
+    this.comments = this.comments.filter(c =>
+      !filters.some(f => c.content.includes(f))
+    );
+    return before - this.comments.length;
+  }
+
+  /**
+   * Clone a comment to a different organization
+   * @param commentId - Source comment
+   * @param targetOrg - Target organization name
+   * @returns The cloned comment or undefined
+   */
+  cloneToOrg(commentId: number, targetOrg: string): Comment | undefined {
+    const source = this.getCommentById(commentId);
+    if (!source) return undefined;
+    try {
+      return this.createComment(targetOrg, source.content, source.author);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Generate an activity feed HTML for an organization
+   * @param orgName - Organization name
+   * @param maxEntries - Maximum number of entries
+   * @returns HTML string of the activity feed
+   */
+  generateActivityFeed(orgName: string, maxEntries: number): { author: string; content: string; date: string }[] {
+    return this.getCommentsByOrganization(orgName)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, Math.max(0, maxEntries))
+      .map(c => ({ author: c.author, content: c.content, date: c.createdAt.toLocaleDateString() }));
+  }
+
+  /**
+   * Replace comments matching a regex pattern with a template
+   * @param pattern - Regex pattern to match against content
+   * @param template - Replacement template
+   * @returns Number of comments modified
+   */
+  replaceByPattern(pattern: string, template: string): number {
+    if (pattern.length === 0) return 0;
+    const lowerPattern = pattern.toLowerCase();
+    let count = 0;
+    for (const comment of this.comments) {
+      if (comment.content.toLowerCase().indexOf(lowerPattern) !== -1) {
+        comment.content = comment.content.split(pattern).join(template);
+        comment.updatedAt = new Date();
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Export comments as a CSV row per comment
+   * @param orgName - Organization to export
+   * @param delimiter - Column delimiter
+   * @returns CSV string
+   */
+  exportAsCsv(orgName: string): string {
+    const comments = this.getCommentsByOrganization(orgName);
+    const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const header = 'id,author,content,createdAt';
+    const rows = comments.map(c =>
+      `${c.id},${q(c.author)},${q(c.content)},${c.createdAt.toISOString()}`
+    );
+    return [header, ...rows].join('\n');
+  }
+
+  /**
+   * Compact the comments array by removing gaps in IDs
+   * @returns Number of comments re-indexed
+   */
+  compactIds(): number {
+    this.comments = this.comments.map((c, i) => {
+      const clone = structuredClone(c);
+      return { ...clone, id: i + 1 };
+    });
+    this.nextId = this.comments.length + 1;
+    return this.comments.length;
+  }
+
+  /**
+   * Get a leaderboard of top commenters with their stats
+   * @param limit - Number of top commenters to return
+   * @returns Array of objects with author name and comment count
+   */
+  getLeaderboard(limit: number): { author: string; count: number; percentage: number }[] {
+    const counts = new Map<string, number>();
+    for (const c of this.comments) {
+      counts.set(c.author, (counts.get(c.author) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([author, count]) => ({
+        author,
+        count,
+        percentage: this.comments.length > 0 ? (count / this.comments.length) * 100 : 0,
+      }));
+  }
 }
