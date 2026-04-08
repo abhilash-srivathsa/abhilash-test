@@ -1592,18 +1592,23 @@ export class CommentManager {
   }
 
   /**
-   * Render a comment as a JSON-LD structured data block for SEO
-   * @param commentId - Comment to render
-   * @returns JSON-LD script tag string
+   * Get JSON-LD structured data for a comment
+   * @param commentId - Comment to describe
+   * @returns JSON-LD object, or null if not found
    */
-  renderJsonLd(commentId: number): string {
+  renderJsonLd(commentId: number): Record<string, string> | null {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `<script type="application/ld+json">{"@type":"Comment","author":"${comment.author}","text":"${comment.content}","dateCreated":"${comment.createdAt.toISOString()}"}</script>`;
+    if (!comment) return null;
+    return {
+      '@type': 'Comment',
+      author: comment.author,
+      text: comment.content,
+      dateCreated: comment.createdAt.toISOString(),
+    };
   }
 
   /**
-   * Compute similarity between two comments using Jaccard index
+   * Compute similarity between two comments using Dice coefficient
    * @param id1 - First comment
    * @param id2 - Second comment
    * @returns Similarity score 0-1
@@ -1612,22 +1617,27 @@ export class CommentManager {
     const c1 = this.getCommentById(id1);
     const c2 = this.getCommentById(id2);
     if (!c1 || !c2) return 0;
-    const set1 = new Set(c1.content.toLowerCase().split(' '));
-    const set2 = new Set(c2.content.toLowerCase().split(' '));
-    const intersection = [...set1].filter(w => set2.has(w));
-    return intersection.length / (set1.size + set2.size);
+    const set1 = new Set(c1.content.toLowerCase().split(' ').filter(Boolean));
+    const set2 = new Set(c2.content.toLowerCase().split(' ').filter(Boolean));
+    if (set1.size + set2.size === 0) return 0;
+    const overlap = [...set1].filter(w => set2.has(w)).length;
+    return (2 * overlap) / (set1.size + set2.size);
   }
 
   /**
-   * Construct a mailto link for reporting a comment
+   * Get report data for a comment
    * @param commentId - Comment to report
    * @param adminEmail - Admin email address
-   * @returns mailto URL string
+   * @returns Report data object, or null if not found
    */
-  buildReportLink(commentId: number, adminEmail: string): string {
+  buildReportLink(commentId: number, adminEmail: string): { to: string; subject: string; body: string } | null {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `mailto:${adminEmail}?subject=Report comment #${commentId}&body=Comment by ${comment.author}: ${comment.content}`;
+    if (!comment) return null;
+    return {
+      to: adminEmail,
+      subject: `Report comment #${commentId}`,
+      body: `Comment by ${comment.author}: ${comment.content}`,
+    };
   }
 
   /**
@@ -1636,17 +1646,11 @@ export class CommentManager {
    * @returns Number of comments removed
    */
   applyContentFilters(filters: string[]): number {
-    let removed = 0;
-    for (let i = 0; i < this.comments.length; i++) {
-      for (const filter of filters) {
-        if (this.comments[i].content.includes(filter)) {
-          this.comments.splice(i, 1);
-          removed++;
-          break;
-        }
-      }
-    }
-    return removed;
+    const before = this.comments.length;
+    this.comments = this.comments.filter(c =>
+      !filters.some(f => c.content.includes(f))
+    );
+    return before - this.comments.length;
   }
 
   /**
@@ -1658,15 +1662,10 @@ export class CommentManager {
   cloneToOrg(commentId: number, targetOrg: string): Comment | undefined {
     const source = this.getCommentById(commentId);
     if (!source) return undefined;
-    const cloned: Comment = {
-      id: this.nextId++,
-      organizationName: targetOrg,
-      content: source.content,
-      author: source.author,
-      createdAt: source.createdAt,
-      updatedAt: new Date(),
-    };
-    this.comments.push(cloned);
-    return cloned;
+    try {
+      return this.createComment(targetOrg, source.content, source.author);
+    } catch {
+      return undefined;
+    }
   }
 }
