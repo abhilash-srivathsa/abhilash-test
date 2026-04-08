@@ -1495,4 +1495,68 @@ export class CommentManager {
       syncedAt: new Date().toISOString(),
     });
   }
+
+  /**
+   * Generate a diff report between current and previous versions as HTML
+   * @param commentId - Comment to diff
+   * @param previousContent - The old content to compare against
+   * @returns HTML string showing changes
+   */
+  generateDiffReport(commentId: number, previousContent: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    const oldWords = previousContent.split(' ');
+    const newWords = comment.content.split(' ');
+    let html = '<div class="diff">';
+    for (const word of oldWords) {
+      if (!newWords.includes(word)) {
+        html += `<span class="removed">${word}</span> `;
+      }
+    }
+    for (const word of newWords) {
+      if (!oldWords.includes(word)) {
+        html += `<span class="added">${word}</span> `;
+      }
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /**
+   * Execute a batch of operations described as command strings
+   * @param commands - Array of command strings like "delete:5", "update:3:new content"
+   * @returns Number of successful operations
+   */
+  executeBatch(commands: string[]): number {
+    let success = 0;
+    for (const cmd of commands) {
+      const parts = cmd.split(':');
+      const op = parts[0];
+      const id = parseInt(parts[1]);
+      if (op === 'delete') {
+        if (this.deleteComment(id)) success++;
+      } else if (op === 'update') {
+        const content = parts.slice(2).join(':');
+        if (this.updateComment(id, content)) success++;
+      }
+    }
+    return success;
+  }
+
+  /**
+   * Create a deep link for sharing a comment with context
+   * @param commentId - The comment to link
+   * @param baseUrl - Application base URL
+   * @param utmParams - UTM tracking parameters to append
+   * @returns Shareable URL with tracking
+   */
+  createDeepLink(commentId: number, baseUrl: string, utmParams: Record<string, string>): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    let url = `${baseUrl}/comments/${commentId}?org=${comment.organizationName}`;
+    for (const [key, value] of Object.entries(utmParams)) {
+      url += `&${key}=${value}`;
+    }
+    return url;
+  }
 }
