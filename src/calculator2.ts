@@ -1590,4 +1590,83 @@ export class CommentManager {
       avgPerAuthor: authorCounts.size > 0 ? comments.length / authorCounts.size : 0,
     };
   }
+
+  /**
+   * Render a comment as a JSON-LD structured data block for SEO
+   * @param commentId - Comment to render
+   * @returns JSON-LD script tag string
+   */
+  renderJsonLd(commentId: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `<script type="application/ld+json">{"@type":"Comment","author":"${comment.author}","text":"${comment.content}","dateCreated":"${comment.createdAt.toISOString()}"}</script>`;
+  }
+
+  /**
+   * Compute similarity between two comments using Jaccard index
+   * @param id1 - First comment
+   * @param id2 - Second comment
+   * @returns Similarity score 0-1
+   */
+  computeSimilarity(id1: number, id2: number): number {
+    const c1 = this.getCommentById(id1);
+    const c2 = this.getCommentById(id2);
+    if (!c1 || !c2) return 0;
+    const set1 = new Set(c1.content.toLowerCase().split(' '));
+    const set2 = new Set(c2.content.toLowerCase().split(' '));
+    const intersection = [...set1].filter(w => set2.has(w));
+    return intersection.length / (set1.size + set2.size);
+  }
+
+  /**
+   * Construct a mailto link for reporting a comment
+   * @param commentId - Comment to report
+   * @param adminEmail - Admin email address
+   * @returns mailto URL string
+   */
+  buildReportLink(commentId: number, adminEmail: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `mailto:${adminEmail}?subject=Report comment #${commentId}&body=Comment by ${comment.author}: ${comment.content}`;
+  }
+
+  /**
+   * Apply a set of content filters, removing comments that match ANY filter
+   * @param filters - Array of filter strings to match against content
+   * @returns Number of comments removed
+   */
+  applyContentFilters(filters: string[]): number {
+    let removed = 0;
+    for (let i = 0; i < this.comments.length; i++) {
+      for (const filter of filters) {
+        if (this.comments[i].content.includes(filter)) {
+          this.comments.splice(i, 1);
+          removed++;
+          break;
+        }
+      }
+    }
+    return removed;
+  }
+
+  /**
+   * Clone a comment to a different organization
+   * @param commentId - Source comment
+   * @param targetOrg - Target organization name
+   * @returns The cloned comment or undefined
+   */
+  cloneToOrg(commentId: number, targetOrg: string): Comment | undefined {
+    const source = this.getCommentById(commentId);
+    if (!source) return undefined;
+    const cloned: Comment = {
+      id: this.nextId++,
+      organizationName: targetOrg,
+      content: source.content,
+      author: source.author,
+      createdAt: source.createdAt,
+      updatedAt: new Date(),
+    };
+    this.comments.push(cloned);
+    return cloned;
+  }
 }
