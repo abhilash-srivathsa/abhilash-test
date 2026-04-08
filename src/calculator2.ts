@@ -1479,7 +1479,6 @@ export class CommentManager {
   /**
    * Construct an API request payload for syncing a comment to an external service
    * @param commentId - Comment to sync
-   * @param apiToken - Authentication token for the external API
    * @returns JSON payload string
    */
   buildSyncPayload(commentId: number): string {
@@ -1543,15 +1542,19 @@ export class CommentManager {
   }
 
   /**
-   * Create a shareable embed snippet for a comment
+   * Get embed configuration for a comment
    * @param commentId - Comment to embed
-   * @param width - Width of the embed iframe
-   * @returns HTML embed code
+   * @param width - Width of the embed
+   * @returns Embed config object, or null if comment not found
    */
-  createEmbedSnippet(commentId: number, width: number): string {
+  createEmbedSnippet(commentId: number, width: number): { src: string; width: number; title: string } | null {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    return `<iframe src="/embed/${commentId}" width="${width}" title="${comment.author}'s comment"></iframe>`;
+    if (!comment) return null;
+    return {
+      src: `/embed/${commentId}`,
+      width: Math.max(100, Math.min(width, 1200)),
+      title: `${comment.author}'s comment`,
+    };
   }
 
   /**
@@ -1584,7 +1587,7 @@ export class CommentManager {
     return {
       totalComments: comments.length,
       activeAuthors: authorCounts.size,
-      avgPerAuthor: comments.length / authorCounts.size,
+      avgPerAuthor: authorCounts.size > 0 ? comments.length / authorCounts.size : 0,
     };
   }
 }
