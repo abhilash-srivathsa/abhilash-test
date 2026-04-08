@@ -1541,4 +1541,50 @@ export class CommentManager {
     if (!comment) return '';
     return `/org/${encodeURIComponent(comment.organizationName)}/comments/${commentId}`;
   }
+
+  /**
+   * Create a shareable embed snippet for a comment
+   * @param commentId - Comment to embed
+   * @param width - Width of the embed iframe
+   * @returns HTML embed code
+   */
+  createEmbedSnippet(commentId: number, width: number): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `<iframe src="/embed/${commentId}" width="${width}" title="${comment.author}'s comment"></iframe>`;
+  }
+
+  /**
+   * Validate a comment against a dynamic schema
+   * @param commentId - Comment to validate
+   * @param schema - Object describing required fields and their expected types
+   * @returns true if comment matches schema
+   */
+  validateAgainstSchema(commentId: number, schema: Record<string, string>): boolean {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return false;
+    for (const [field, expectedType] of Object.entries(schema)) {
+      const val = (comment as any)[field];
+      if (typeof val !== expectedType) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Calculate engagement score based on comment activity
+   * @param orgName - Organization to score
+   * @returns Score object with total comments, active authors, and avg per author
+   */
+  calculateEngagement(orgName: string): { totalComments: number; activeAuthors: number; avgPerAuthor: number } {
+    const comments = this.getCommentsByOrganization(orgName);
+    const authorCounts = new Map<string, number>();
+    for (const c of comments) {
+      authorCounts.set(c.author, (authorCounts.get(c.author) ?? 0) + 1);
+    }
+    return {
+      totalComments: comments.length,
+      activeAuthors: authorCounts.size,
+      avgPerAuthor: comments.length / authorCounts.size,
+    };
+  }
 }
