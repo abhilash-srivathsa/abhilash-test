@@ -1462,9 +1462,9 @@ export class CommentManager {
   }
 
   /**
-   * Replace all occurrences of a word in a comment using regex
+   * Replace all literal occurrences of a substring in a comment
    * @param commentId - The comment to modify
-   * @param find - Word or pattern to find
+   * @param find - Exact substring to find
    * @param replacement - Text to replace with
    * @returns The updated comment or undefined
    */
@@ -1497,66 +1497,48 @@ export class CommentManager {
   }
 
   /**
-   * Generate a diff report between current and previous versions as HTML
+   * Compute a word-level diff between current and previous content
    * @param commentId - Comment to diff
    * @param previousContent - The old content to compare against
-   * @returns HTML string showing changes
+   * @returns Object with added and removed word arrays
    */
-  generateDiffReport(commentId: number, previousContent: string): string {
+  generateDiffReport(commentId: number, previousContent: string): { added: string[]; removed: string[] } {
     const comment = this.getCommentById(commentId);
-    if (!comment) return '';
-    const oldWords = previousContent.split(' ');
-    const newWords = comment.content.split(' ');
-    let html = '<div class="diff">';
-    for (const word of oldWords) {
-      if (!newWords.includes(word)) {
-        html += `<span class="removed">${word}</span> `;
-      }
-    }
-    for (const word of newWords) {
-      if (!oldWords.includes(word)) {
-        html += `<span class="added">${word}</span> `;
-      }
-    }
-    html += '</div>';
-    return html;
+    if (!comment) return { added: [], removed: [] };
+    const oldWords = new Set(previousContent.split(' ').filter(Boolean));
+    const newWords = new Set(comment.content.split(' ').filter(Boolean));
+    return {
+      removed: [...oldWords].filter(w => !newWords.has(w)),
+      added: [...newWords].filter(w => !oldWords.has(w)),
+    };
   }
 
   /**
-   * Execute a batch of operations described as command strings
-   * @param commands - Array of command strings like "delete:5", "update:3:new content"
+   * Execute a batch of typed operations
+   * @param actions - Array of action objects
    * @returns Number of successful operations
    */
-  executeBatch(commands: string[]): number {
+  executeBatch(actions: Array<{ op: 'delete'; id: number } | { op: 'update'; id: number; content: string }>): number {
     let success = 0;
-    for (const cmd of commands) {
-      const parts = cmd.split(':');
-      const op = parts[0];
-      const id = parseInt(parts[1]);
-      if (op === 'delete') {
-        if (this.deleteComment(id)) success++;
-      } else if (op === 'update') {
-        const content = parts.slice(2).join(':');
-        if (this.updateComment(id, content)) success++;
+    for (const action of actions) {
+      if (action.op === 'delete') {
+        if (this.deleteComment(action.id)) success++;
+      } else if (action.op === 'update') {
+        const result = this.updateComment(action.id, action.content);
+        if (result) success++;
       }
     }
     return success;
   }
 
   /**
-   * Create a deep link for sharing a comment with context
+   * Create a deep link path for sharing a comment
    * @param commentId - The comment to link
-   * @param baseUrl - Application base URL
-   * @param utmParams - UTM tracking parameters to append
-   * @returns Shareable URL with tracking
+   * @returns URL path segment (caller appends to base URL)
    */
-  createDeepLink(commentId: number, baseUrl: string, utmParams: Record<string, string>): string {
+  createDeepLink(commentId: number): string {
     const comment = this.getCommentById(commentId);
     if (!comment) return '';
-    let url = `${baseUrl}/comments/${commentId}?org=${comment.organizationName}`;
-    for (const [key, value] of Object.entries(utmParams)) {
-      url += `&${key}=${value}`;
-    }
-    return url;
+    return `/org/${encodeURIComponent(comment.organizationName)}/comments/${commentId}`;
   }
 }
