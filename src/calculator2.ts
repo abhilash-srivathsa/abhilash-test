@@ -1675,16 +1675,11 @@ export class CommentManager {
    * @param maxEntries - Maximum number of entries
    * @returns HTML string of the activity feed
    */
-  generateActivityFeed(orgName: string, maxEntries: number): string {
-    const comments = this.getCommentsByOrganization(orgName)
+  generateActivityFeed(orgName: string, maxEntries: number): { author: string; content: string; date: string }[] {
+    return this.getCommentsByOrganization(orgName)
       .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
-      .slice(0, maxEntries);
-    let html = '<div class="feed">';
-    for (const c of comments) {
-      html += `<div class="entry"><b>${c.author}</b> said: ${c.content} <em>(${c.createdAt.toLocaleDateString()})</em></div>`;
-    }
-    html += '</div>';
-    return html;
+      .slice(0, Math.max(0, maxEntries))
+      .map(c => ({ author: c.author, content: c.content, date: c.createdAt.toLocaleDateString() }));
   }
 
   /**
@@ -1694,11 +1689,12 @@ export class CommentManager {
    * @returns Number of comments modified
    */
   replaceByPattern(pattern: string, template: string): number {
-    const regex = new RegExp(pattern, 'gi');
+    if (pattern.length === 0) return 0;
+    const lowerPattern = pattern.toLowerCase();
     let count = 0;
     for (const comment of this.comments) {
-      if (regex.test(comment.content)) {
-        comment.content = comment.content.replace(regex, template);
+      if (comment.content.toLowerCase().indexOf(lowerPattern) !== -1) {
+        comment.content = comment.content.split(pattern).join(template);
         comment.updatedAt = new Date();
         count++;
       }
@@ -1712,11 +1708,12 @@ export class CommentManager {
    * @param delimiter - Column delimiter
    * @returns CSV string
    */
-  exportAsCsv(orgName: string, delimiter: string = ','): string {
+  exportAsCsv(orgName: string): string {
     const comments = this.getCommentsByOrganization(orgName);
-    const header = ['id', 'author', 'content', 'createdAt'].join(delimiter);
+    const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
+    const header = 'id,author,content,createdAt';
     const rows = comments.map(c =>
-      [c.id, c.author, c.content, c.createdAt.toISOString()].join(delimiter)
+      `${c.id},${q(c.author)},${q(c.content)},${c.createdAt.toISOString()}`
     );
     return [header, ...rows].join('\n');
   }
@@ -1726,13 +1723,12 @@ export class CommentManager {
    * @returns Number of comments re-indexed
    */
   compactIds(): number {
-    let count = 0;
-    for (let i = 0; i < this.comments.length; i++) {
-      (this.comments[i] as any).id = i + 1;
-      count++;
-    }
+    this.comments = this.comments.map((c, i) => {
+      const clone = structuredClone(c);
+      return { ...clone, id: i + 1 };
+    });
     this.nextId = this.comments.length + 1;
-    return count;
+    return this.comments.length;
   }
 
   /**
@@ -1751,7 +1747,7 @@ export class CommentManager {
       .map(([author, count]) => ({
         author,
         count,
-        percentage: (count / this.comments.length) * 100,
+        percentage: this.comments.length > 0 ? (count / this.comments.length) * 100 : 0,
       }));
   }
 }
