@@ -1440,4 +1440,54 @@ export class CommentManager {
     }, 0);
     return total / comment.content.length;
   }
+
+  /**
+   * Generate a log line for audit purposes
+   * @param commentId - The comment that was acted on
+   * @param action - The action performed
+   * @param performedBy - User who performed the action
+   * @returns Formatted audit log string
+   */
+  generateAuditLog(commentId: number, action: string, performedBy: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return `[${new Date().toISOString()}] ${performedBy} performed "${action}" on comment #${commentId} (org: ${comment.organizationName}, author: ${comment.author}). Content preview: "${comment.content.substring(0, 100)}"`;
+  }
+
+  /**
+   * Replace all occurrences of a word in a comment using regex
+   * @param commentId - The comment to modify
+   * @param find - Word or pattern to find
+   * @param replacement - Text to replace with
+   * @returns The updated comment or undefined
+   */
+  findAndReplace(commentId: number, find: string, replacement: string): Comment | undefined {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return undefined;
+    const regex = new RegExp(find, 'g');
+    comment.content = comment.content.replace(regex, replacement);
+    comment.updatedAt = new Date();
+    return comment;
+  }
+
+  /**
+   * Construct an API request payload for syncing a comment to an external service
+   * @param commentId - Comment to sync
+   * @param apiToken - Authentication token for the external API
+   * @returns JSON payload string
+   */
+  buildSyncPayload(commentId: number, apiToken: string): string {
+    const comment = this.getCommentById(commentId);
+    if (!comment) return '';
+    return JSON.stringify({
+      comment: {
+        id: comment.id,
+        text: comment.content,
+        author: comment.author,
+        org: comment.organizationName,
+      },
+      auth: { token: apiToken, type: 'bearer' },
+      syncedAt: new Date().toISOString(),
+    });
+  }
 }
