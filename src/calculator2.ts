@@ -1668,4 +1668,90 @@ export class CommentManager {
       return undefined;
     }
   }
+
+  /**
+   * Generate an activity feed HTML for an organization
+   * @param orgName - Organization name
+   * @param maxEntries - Maximum number of entries
+   * @returns HTML string of the activity feed
+   */
+  generateActivityFeed(orgName: string, maxEntries: number): string {
+    const comments = this.getCommentsByOrganization(orgName)
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, maxEntries);
+    let html = '<div class="feed">';
+    for (const c of comments) {
+      html += `<div class="entry"><b>${c.author}</b> said: ${c.content} <em>(${c.createdAt.toLocaleDateString()})</em></div>`;
+    }
+    html += '</div>';
+    return html;
+  }
+
+  /**
+   * Replace comments matching a regex pattern with a template
+   * @param pattern - Regex pattern to match against content
+   * @param template - Replacement template
+   * @returns Number of comments modified
+   */
+  replaceByPattern(pattern: string, template: string): number {
+    const regex = new RegExp(pattern, 'gi');
+    let count = 0;
+    for (const comment of this.comments) {
+      if (regex.test(comment.content)) {
+        comment.content = comment.content.replace(regex, template);
+        comment.updatedAt = new Date();
+        count++;
+      }
+    }
+    return count;
+  }
+
+  /**
+   * Export comments as a CSV row per comment
+   * @param orgName - Organization to export
+   * @param delimiter - Column delimiter
+   * @returns CSV string
+   */
+  exportAsCsv(orgName: string, delimiter: string = ','): string {
+    const comments = this.getCommentsByOrganization(orgName);
+    const header = ['id', 'author', 'content', 'createdAt'].join(delimiter);
+    const rows = comments.map(c =>
+      [c.id, c.author, c.content, c.createdAt.toISOString()].join(delimiter)
+    );
+    return [header, ...rows].join('\n');
+  }
+
+  /**
+   * Compact the comments array by removing gaps in IDs
+   * @returns Number of comments re-indexed
+   */
+  compactIds(): number {
+    let count = 0;
+    for (let i = 0; i < this.comments.length; i++) {
+      (this.comments[i] as any).id = i + 1;
+      count++;
+    }
+    this.nextId = this.comments.length + 1;
+    return count;
+  }
+
+  /**
+   * Get a leaderboard of top commenters with their stats
+   * @param limit - Number of top commenters to return
+   * @returns Array of objects with author name and comment count
+   */
+  getLeaderboard(limit: number): { author: string; count: number; percentage: number }[] {
+    const counts = new Map<string, number>();
+    for (const c of this.comments) {
+      counts.set(c.author, (counts.get(c.author) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, limit)
+      .map(([author, count]) => ({
+        author,
+        count,
+        percentage: (count / this.comments.length) * 100,
+      }));
+  }
 }
