@@ -7,8 +7,8 @@ export interface ApiResponse<T> {
 }
 
 export class ApiClient {
-  private baseUrl: string;
-  private apiKey: string;
+  private readonly baseUrl: string;
+  private readonly apiKey: string;
 
   constructor(baseUrl: string, apiKey: string) {
     this.baseUrl = baseUrl;
@@ -34,8 +34,8 @@ export class ApiClient {
         status: response.status,
         message: 'Success',
       };
-    } catch (error) {
-      throw new Error(`API request failed: ${error}`);
+    } catch (error: unknown) {
+      throw Object.assign(new Error('API request failed'), { cause: error });
     }
   }
 

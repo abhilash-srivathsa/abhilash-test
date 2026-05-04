@@ -1,34 +1,34 @@
 import { isValidEmail, normalizeTimezone } from './utils';
 
 export interface User {
-  id: string;
-  name: string;
-  email: string;
-  age: number;
-  status: UserStatus;
-  preferences: UserPreferences;
-  createdAt: Date;
-  updatedAt: Date;
+  readonly id: string;
+  readonly name: string;
+  readonly email: string;
+  readonly age: number;
+  readonly status: UserStatus;
+  readonly preferences: UserPreferences;
+  readonly createdAt: Date;
+  readonly updatedAt: Date;
 }
 
 export type UserStatus = 'active' | 'inactive' | 'pending';
 
 export interface UserPreferences {
-  marketingEmails: boolean;
-  productUpdates: boolean;
-  timezone: string;
+  readonly marketingEmails: boolean;
+  readonly productUpdates: boolean;
+  readonly timezone: string;
 }
 
 export interface CreateUserInput {
-  name: string;
-  email: string;
-  age: number;
-  preferences?: Partial<UserPreferences>;
+  readonly name: string;
+  readonly email: string;
+  readonly age: number;
+  readonly preferences?: Partial<Readonly<UserPreferences>>;
 }
 
 export interface UserSearchOptions {
-  status?: UserStatus;
-  marketingEmails?: boolean;
+  readonly status?: UserStatus;
+  readonly marketingEmails?: boolean;
 }
 
 export class UserService {
@@ -46,9 +46,13 @@ export class UserService {
       throw new Error('A valid email address is required');
     }
 
+    if (input.age < 0) {
+      throw new Error('Age must be zero or greater');
+    }
+
     const now = new Date();
     const user: User = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).substring(2, 11),
       name: input.name,
       email: input.email,
       age: input.age,
@@ -76,7 +80,7 @@ export class UserService {
       return null;
     }
 
-    const updatedUser = { ...user, ...updates };
+    const updatedUser = { ...user, ...updates, updatedAt: new Date() };
     this.users.set(id, updatedUser);
     return updatedUser;
   }
