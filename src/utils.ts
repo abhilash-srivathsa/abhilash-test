@@ -10,6 +10,23 @@ export function isValidEmail(email: string): boolean {
   return emailRegex.test(email);
 }
 
+export function isSupportedTimezone(timezone: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function normalizeTimezone(timezone?: string): string {
+  if (!timezone) {
+    return 'UTC';
+  }
+
+  return isSupportedTimezone(timezone) ? timezone : 'UTC';
+}
+
 export function debounce<T extends (...args: any[]) => any>(
   func: T,
   delay: number

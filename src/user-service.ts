@@ -3,7 +3,18 @@ export interface User {
   name: string;
   email: string;
   age: number;
+  status: UserStatus;
+  preferences: UserPreferences;
   createdAt: Date;
+  updatedAt: Date;
+}
+
+export type UserStatus = 'active' | 'inactive' | 'pending';
+
+export interface UserPreferences {
+  marketingEmails: boolean;
+  productUpdates: boolean;
+  timezone: string;
 }
 
 export class UserService {
@@ -15,7 +26,14 @@ export class UserService {
       name: name,
       email: email,
       age: age,
+      status: 'pending',
+      preferences: {
+        marketingEmails: false,
+        productUpdates: true,
+        timezone: 'UTC',
+      },
       createdAt: new Date(),
+      updatedAt: new Date(),
     };
 
     this.users.set(user.id, user);
