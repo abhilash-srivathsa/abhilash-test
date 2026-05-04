@@ -1,3 +1,5 @@
+import { CreateUserInput, User, UserPreferences, UserSearchOptions } from './user-service';
+
 export interface ApiResponse<T> {
   data: T;
   status: number;
@@ -25,7 +27,7 @@ export class ApiClient {
         },
       });
 
-      const data = await response.json();
+      const data = await response.json() as T;
 
       return {
         data: data,
@@ -37,7 +39,7 @@ export class ApiClient {
     }
   }
 
-  async post<T>(endpoint: string, body: any): Promise<ApiResponse<T>> {
+  async post<T>(endpoint: string, body: unknown): Promise<ApiResponse<T>> {
     const url = `${this.baseUrl}${endpoint}`;
 
     const response = await fetch(url, {
@@ -50,7 +52,7 @@ export class ApiClient {
     });
 
     // Missing error handling
-    const data = await response.json();
+    const data = await response.json() as T;
 
     return {
       data: data,
@@ -70,5 +72,35 @@ export class ApiClient {
     });
 
     return response.ok;
+  }
+
+  async createUser(input: CreateUserInput): Promise<ApiResponse<User>> {
+    return this.post<User>('/users', input);
+  }
+
+  async activateUser(userId: string): Promise<ApiResponse<User>> {
+    return this.post<User>(`/users/${userId}/activate`, {});
+  }
+
+  async updateUserPreferences(
+    userId: string,
+    preferences: Partial<UserPreferences>
+  ): Promise<ApiResponse<User>> {
+    return this.post<User>(`/users/${userId}/preferences`, preferences);
+  }
+
+  async searchUsers(options: UserSearchOptions = {}): Promise<ApiResponse<User[]>> {
+    const params = new URLSearchParams();
+
+    if (options.status) {
+      params.set('status', options.status);
+    }
+
+    if (options.marketingEmails !== undefined) {
+      params.set('marketingEmails', String(options.marketingEmails));
+    }
+
+    const query = params.toString();
+    return this.get<User[]>(`/users${query ? `?${query}` : ''}`);
   }
 }
