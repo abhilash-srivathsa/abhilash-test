@@ -7,7 +7,25 @@ declare function expect(value: unknown): {
 };
 
 import { UserEngagementWorkflow } from './user-engagement';
-import { UserService } from './user-service';
+import { ApiClient, ApiResponse } from './api-client';
+import { CreateUserInput, User, UserPreferences, UserService } from './user-service';
+
+class FailingApiClient extends ApiClient {
+  constructor() {
+    super('https://example.com', 'test-key');
+  }
+
+  async createUser(input: CreateUserInput): Promise<ApiResponse<User>> {
+    throw new Error(`Unable to sync ${input.email}`);
+  }
+
+  async updateUserPreferences(
+    userId: string,
+    preferences: Partial<UserPreferences>
+  ): Promise<ApiResponse<User>> {
+    throw new Error(`Unable to sync preferences for ${userId}`);
+  }
+}
 
 describe('UserEngagementWorkflow', () => {
   it('registers a local user without remote sync by default', async () => {
@@ -26,6 +44,24 @@ describe('UserEngagementWorkflow', () => {
     expect(result.synced).toBe(false);
     expect(result.localUser.status).toBe('pending');
     expect(result.localUser.preferences.timezone).toBe('America/Los_Angeles');
+  });
+
+  it('rolls back local signups when remote sync fails', async () => {
+    const service = new UserService();
+    const workflow = new UserEngagementWorkflow(service, new FailingApiClient());
+
+    const result = await workflow.registerUser(
+      {
+        name: 'Ren',
+        email: 'ren@example.com',
+        age: 33,
+      },
+      { syncRemote: true }
+    );
+    const storedUser = await service.getUserById(result.localUser.id);
+
+    expect(result.synced).toBe(false);
+    expect(storedUser).toBe(undefined);
   });
 
   it('activates pending users who meet product update eligibility', async () => {
@@ -62,5 +98,22 @@ describe('UserEngagementWorkflow', () => {
 
     expect(user?.preferences.marketingEmails).toBe(true);
     expect(user?.preferences.timezone).toBe('UTC');
+  });
+
+  it('returns remote sync status for preference update failures', async () => {
+    const service = new UserService();
+    const workflow = new UserEngagementWorkflow(service, new FailingApiClient());
+    const result = await workflow.registerUser({
+      name: 'Sam',
+      email: 'sam@example.com',
+      age: 29,
+    });
+
+    const syncResult = await workflow.syncPreferenceUpdate(result.localUser.id, {
+      marketingEmails: true,
+    });
+
+    expect(syncResult.user?.preferences.marketingEmails).toBe(true);
+    expect(syncResult.remoteSynced).toBe(false);
   });
 });
