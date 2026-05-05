@@ -38,6 +38,13 @@ export interface AuditEventQuery {
   status?: AuditStatus;
 }
 
+export function serializeAuditEvent(event: AuditEvent): Record<string, unknown> {
+  return {
+    ...event,
+    occurredAt: event.occurredAt.toISOString(),
+  };
+}
+
 export interface AuditActionRollup {
   action: AuditAction;
   successCount: number;
