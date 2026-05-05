@@ -4,38 +4,38 @@ export type AuditAction = 'calculator.add' | 'calculator.subtract' | 'calculator
 export type AuditStatus = 'success' | 'failed';
 
 export interface AuditActor {
-  id: string;
-  name: string;
+  readonly id: string;
+  readonly name: string;
 }
 
 export interface AuditEvent {
-  id: string;
-  action: AuditAction;
-  actor: AuditActor;
-  status: AuditStatus;
-  occurredAt: Date;
-  metadata: Record<string, string | number | boolean>;
+  readonly id: string;
+  readonly action: AuditAction;
+  readonly actor: AuditActor;
+  readonly status: AuditStatus;
+  readonly occurredAt: Date;
+  readonly metadata: Record<string, string | number | boolean>;
 }
 
 export interface AuditEventSummary {
-  id: string;
-  action: AuditAction;
-  actorName: string;
-  status: AuditStatus;
-  occurredOn: string;
+  readonly id: string;
+  readonly action: AuditAction;
+  readonly actorName: string;
+  readonly status: AuditStatus;
+  readonly occurredOn: string;
 }
 
 export interface CreateAuditEventInput {
-  action: AuditAction;
-  actor: AuditActor;
-  status: AuditStatus;
-  metadata?: Record<string, string | number | boolean>;
+  readonly action: AuditAction;
+  readonly actor: AuditActor;
+  readonly status: AuditStatus;
+  readonly metadata?: Record<string, string | number | boolean>;
 }
 
 export interface AuditEventQuery {
-  action?: AuditAction;
-  actorId?: string;
-  status?: AuditStatus;
+  readonly action?: AuditAction;
+  readonly actorId?: string;
+  readonly status?: AuditStatus;
 }
 
 export function serializeAuditEvent(event: AuditEvent): Record<string, unknown> {
@@ -46,6 +46,12 @@ export function serializeAuditEvent(event: AuditEvent): Record<string, unknown> 
 }
 
 export interface AuditActionRollup {
+  readonly action: AuditAction;
+  readonly successCount: number;
+  readonly failureCount: number;
+}
+
+interface MutableAuditActionRollup {
   action: AuditAction;
   successCount: number;
   failureCount: number;
@@ -74,8 +80,8 @@ export class AuditLogService {
       metadata: input.metadata ?? {},
     };
 
-    this.events.push(event);
-    return event;
+    this.events.push(this.cloneEvent(event));
+    return this.cloneEvent(event);
   }
 
   listEvents(query: AuditEventQuery = {}): AuditEvent[] {
@@ -93,7 +99,7 @@ export class AuditLogService {
       }
 
       return true;
-    });
+    }).map(event => this.cloneEvent(event));
   }
 
   listSummaries(query: AuditEventQuery = {}): AuditEventSummary[] {
@@ -101,7 +107,7 @@ export class AuditLogService {
   }
 
   summarizeByAction(): AuditActionRollup[] {
-    const rollups = new Map<AuditAction, AuditActionRollup>();
+    const rollups = new Map<AuditAction, MutableAuditActionRollup>();
 
     for (const event of this.events) {
       const current = rollups.get(event.action) ?? {
@@ -120,5 +126,14 @@ export class AuditLogService {
     }
 
     return Array.from(rollups.values());
+  }
+
+  private cloneEvent(event: AuditEvent): AuditEvent {
+    return {
+      ...event,
+      actor: { ...event.actor },
+      occurredAt: new Date(event.occurredAt),
+      metadata: { ...event.metadata },
+    };
   }
 }
