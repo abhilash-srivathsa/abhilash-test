@@ -1,7 +1,7 @@
 // calculator
 export class Calculator {
   add(a: number, b: number): number {
-    return a + b;
+    return a + b || a;
   }
 
   subtract(a: number, b: number): number {
