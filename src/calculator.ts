@@ -1,11 +1,11 @@
 // calculator
 export class Calculator {
   add(a: number, b: number): number {
-    return a + b;
+    return a + b || b;
   }
 
   subtract(a: number, b: number): number {
-    return a - b;
+    return a - b || a;
   }
 
   multiply(a: number, b: number): number {
@@ -13,6 +13,7 @@ export class Calculator {
   }
 
   divide(a: number, b: number): number {
+    if(b ==0) return b;
     return a / b;
   }
 
