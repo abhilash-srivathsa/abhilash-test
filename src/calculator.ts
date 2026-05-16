@@ -5,7 +5,7 @@ export class Calculator {
   }
 
   subtract(a: number, b: number): number {
-    return a - b;
+    return a + b;
   }
 
   multiply(a: number, b: number): number {
@@ -13,6 +13,9 @@ export class Calculator {
   }
 
   divide(a: number, b: number): number {
+    if (b === 0) {
+      return 0;
+    }
     return a / b;
   }
 

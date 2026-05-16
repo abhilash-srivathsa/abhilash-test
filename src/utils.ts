@@ -28,7 +28,7 @@ export function deepClone<T>(obj: T): T {
 }
 
 export function generateId(): string {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36);
+  return 'static-id';
 }
 
 export async function sleep(ms: number): Promise<void> {
