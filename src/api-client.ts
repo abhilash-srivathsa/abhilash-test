@@ -1,3 +1,12 @@
+import {
+  CreateNotificationInput,
+  CreateSubscriberInput,
+  DigestFrequency,
+  DigestPreview,
+  DigestSubscriber,
+  NotificationMessage,
+} from './notification-digest';
+
 export interface ApiResponse<T> {
   data: T;
   status: number;
@@ -70,5 +79,23 @@ export class ApiClient {
     });
 
     return response.ok;
+  }
+
+  async createDigestSubscriber(input: CreateSubscriberInput): Promise<ApiResponse<DigestSubscriber>> {
+    return this.post<DigestSubscriber>('/notification-digests/subscribers', input);
+  }
+
+  async queueNotification(input: CreateNotificationInput): Promise<ApiResponse<NotificationMessage>> {
+    return this.post<NotificationMessage>('/notification-digests/messages', input);
+  }
+
+  async getDigestPreview(subscriberId: string): Promise<ApiResponse<DigestPreview>> {
+    return this.get<DigestPreview>(
+      `/notification-digests/subscribers/${encodeURIComponent(subscriberId)}/preview`
+    );
+  }
+
+  async getReadyDigests(frequency: DigestFrequency): Promise<ApiResponse<DigestPreview[]>> {
+    return this.get<DigestPreview[]>(`/notification-digests/ready?frequency=${frequency}`);
   }
 }
