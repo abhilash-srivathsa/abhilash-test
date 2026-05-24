@@ -1,3 +1,5 @@
+import { AuditActionRollup, AuditEvent, AuditEventQuery, CreateAuditEventInput } from './audit-log';
+
 export interface ApiResponse<T> {
   data: T;
   status: number;
@@ -70,5 +72,32 @@ export class ApiClient {
     });
 
     return response.ok;
+  }
+
+  async recordAuditEvent(input: CreateAuditEventInput): Promise<ApiResponse<AuditEvent>> {
+    return this.post<AuditEvent>('/audit/events', input);
+  }
+
+  async getAuditEvents(query: AuditEventQuery = {}): Promise<ApiResponse<AuditEvent[]>> {
+    const params = new URLSearchParams();
+
+    if (query.action) {
+      params.set('action', query.action);
+    }
+
+    if (query.actorId) {
+      params.set('actorId', query.actorId);
+    }
+
+    if (query.status) {
+      params.set('status', query.status);
+    }
+
+    const queryString = params.toString();
+    return this.get<AuditEvent[]>(`/audit/events${queryString ? `?${queryString}` : ''}`);
+  }
+
+  async getAuditRollups(): Promise<ApiResponse<AuditActionRollup[]>> {
+    return this.get<AuditActionRollup[]>('/audit/rollups');
   }
 }
