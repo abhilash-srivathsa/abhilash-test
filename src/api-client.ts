@@ -1,3 +1,11 @@
+import {
+  CreateFeatureFlagInput,
+  FeatureFlag,
+  FeatureFlagEvaluation,
+  FeatureFlagStatus,
+  UpdateFeatureFlagInput,
+} from './feature-flags';
+
 export interface ApiResponse<T> {
   data: T;
   status: number;
@@ -70,5 +78,31 @@ export class ApiClient {
     });
 
     return response.ok;
+  }
+
+  async createFeatureFlag(input: CreateFeatureFlagInput): Promise<ApiResponse<FeatureFlag>> {
+    return this.post<FeatureFlag>('/feature-flags', input);
+  }
+
+  async updateFeatureFlag(
+    key: string,
+    input: UpdateFeatureFlagInput
+  ): Promise<ApiResponse<FeatureFlag>> {
+    return this.post<FeatureFlag>(`/feature-flags/${encodeURIComponent(key)}`, input);
+  }
+
+  async evaluateFeatureFlag(
+    key: string,
+    userId: string
+  ): Promise<ApiResponse<FeatureFlagEvaluation>> {
+    const params = new URLSearchParams({ userId });
+    return this.get<FeatureFlagEvaluation>(
+      `/feature-flags/${encodeURIComponent(key)}/evaluate?${params.toString()}`
+    );
+  }
+
+  async getFeatureFlags(status?: FeatureFlagStatus): Promise<ApiResponse<FeatureFlag[]>> {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return this.get<FeatureFlag[]>(`/feature-flags${query}`);
   }
 }
