@@ -1,3 +1,5 @@
+import type { User } from './user-service';
+
 export function formatDate(date: Date): string {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, '0');
@@ -38,4 +40,25 @@ export async function sleep(ms: number): Promise<void> {
 export function capitalize(str: string): string {
   if (!str) return str;
   return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+export function sanitizeHtml(input: string): string {
+  return input
+    .replace(/<script[\s>][\s\S]*?<\/script>/gi, '')
+    .replace(/on\w+\s*=\s*"[^"]*"/gi, '')
+    .replace(/on\w+\s*=\s*'[^']*'/gi, '')
+    .replace(/javascript\s*:/gi, '');
+}
+
+export async function fetchUserData(userId: string): Promise<User | null> {
+  const response = await fetch(`/api/users/${encodeURIComponent(userId)}`, {
+    method: 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return response.json() as Promise<User>;
 }
